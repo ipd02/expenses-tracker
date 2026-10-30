@@ -26,3 +26,6 @@ __pycache__/
 # Node
 node_modules/
 web/dist/
+.coverage
+.mypy_cache/
+.ruff_cache/

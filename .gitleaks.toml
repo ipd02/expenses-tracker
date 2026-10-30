@@ -1,0 +1,9 @@
+title = "expenses-tracker"
+
+[extend]
+useDefault = true
+
+# The pre-commit hook necessarily contains secret-detection regexes.
+[[allowlists]]
+description = "Secret-pattern regexes in the pre-commit hook"
+paths = ['''^\.githooks/pre-commit$''']
