@@ -1,0 +1,76 @@
+{
+  "card_payment": {
+    "entry_reference": "REF-0001",
+    "status": "BOOK",
+    "credit_debit_indicator": "DBIT",
+    "transaction_amount": {"amount": "12.50", "currency": "EUR"},
+    "creditor": {"name": "EXAMPLE SHOP"},
+    "debtor": null,
+    "creditor_account": null,
+    "debtor_account": {"iban": "ES00 0000 0000 0000 0000 0000"},
+    "remittance_information": ["CARD PAYMENT FUEL // PURCHASE // EXAMPLE SHOP          EXAMPLE CITY   XX"],
+    "booking_date": "2025-03-04",
+    "value_date": "2025-03-03",
+    "bank_transaction_code": null
+  },
+  "direct_debit": {
+    "entry_reference": "REF-0002",
+    "status": "BOOK",
+    "credit_debit_indicator": "DBIT",
+    "transaction_amount": {"amount": "80", "currency": "EUR"},
+    "creditor": null,
+    "debtor": null,
+    "creditor_account": null,
+    "debtor_account": {"iban": "ES00 0000 0000 0000 0000 0000"},
+    "remittance_information": ["DIRECT DEBIT UTILITY // RECEIPT // 0000000000  EXAMPLE UTILITY   CONCEPT 1"],
+    "booking_date": "2025-03-05",
+    "value_date": "2025-03-05",
+    "bank_transaction_code": null
+  },
+  "credit": {
+    "entry_reference": "REF-0003",
+    "status": "BOOK",
+    "credit_debit_indicator": "CRDT",
+    "transaction_amount": {"amount": "1000.00", "currency": "EUR"},
+    "creditor": null,
+    "debtor": {"name": "EXAMPLE EMPLOYER"},
+    "creditor_account": {"iban": "ES00 0000 0000 0000 0000 0000"},
+    "debtor_account": null,
+    "remittance_information": ["TRANSFER RECEIVED // SEPA // EXAMPLE EMPLOYER PAYROLL"],
+    "booking_date": "2025-03-06",
+    "value_date": "2025-03-06",
+    "bank_transaction_code": null
+  },
+  "both_names": {
+    "entry_reference": "REF-0004",
+    "status": "BOOK",
+    "credit_debit_indicator": "DBIT",
+    "transaction_amount": {"amount": "5.00", "currency": "EUR"},
+    "creditor": {"name": "EXAMPLE CREDITOR"},
+    "debtor": {"name": "EXAMPLE DEBTOR"},
+    "remittance_information": ["TRANSFER SENT // SEPA // EXAMPLE FRIEND"],
+    "booking_date": "2025-03-06",
+    "value_date": "2025-03-06",
+    "bank_transaction_code": null
+  },
+  "same_day_a": {
+    "entry_reference": "REF-0005",
+    "status": "BOOK",
+    "credit_debit_indicator": "DBIT",
+    "transaction_amount": {"amount": "3.20", "currency": "EUR"},
+    "creditor": {"name": "EXAMPLE CAFE"},
+    "remittance_information": ["CARD PAYMENT CAFE // PURCHASE // EXAMPLE CAFE   EXAMPLE CITY   XX"],
+    "booking_date": "2025-04-01",
+    "value_date": "2025-04-01"
+  },
+  "same_day_b": {
+    "entry_reference": "REF-0006",
+    "status": "BOOK",
+    "credit_debit_indicator": "DBIT",
+    "transaction_amount": {"amount": "3.20", "currency": "EUR"},
+    "creditor": {"name": "EXAMPLE CAFE"},
+    "remittance_information": ["CARD PAYMENT CAFE // PURCHASE // EXAMPLE CAFE   EXAMPLE CITY   XX"],
+    "booking_date": "2025-04-01",
+    "value_date": "2025-04-01"
+  }
+}
