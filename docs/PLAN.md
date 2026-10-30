@@ -7,35 +7,35 @@ A personal project to strengthen my cloud security profile. My experience is mos
 ## Expenses app (cloud phase)
 
 - Ideas with no real use (notes or password manager) were discarded. Chosen: **personal expenses app**.
-- Card payments are captured automatically; importing CSVs by hand was discarded.
-- Banks to cover: **Trade Republic** (the one I use most), **BBVA** and **Bankinter**.
-- Chosen method: **iOS Shortcuts** (iPhone). One automation per bank card sends the transaction data with a POST to an API on AWS. Open banking was discarded because Trade Republic is not covered.
-- Shortcut authentication: a **long, secret, revocable token** is enough.
-- The web app will show aggregated expenses and allow uploading documents.
-- AWS spend: as low as possible, ideally free. The app will run on AWS for a few days only and then be torn down. A budget alert comes later.
+- **Ingestion: open banking (PSD2) through Enable Banking**, read-only, restricted production mode for personal use. Validated with a local spike. **Scope: BBVA only.** Trade Republic was evaluated and dropped (it returns amount and date but no merchant text and no transaction ID); Bankinter may be added later.
+- The iOS Shortcut / Apple Wallet approach was tested and **discarded**: the Wallet trigger only exposed the merchant name, not the amount.
+- The web app shows aggregated expenses and lets me categorize them.
+- AWS spend: as low as possible, ideally free. The app will run on AWS for a few days and then be torn down. A budget alert comes with the first Terraform apply.
 - General plan: deploy on AWS first, use and test it; then migrate to the home server to avoid costs and learn integration.
 
 ### Decisions
 
-- **Account**: a dedicated AWS member account under the existing root/Organization (not the ClickHouse test account).
+- **Account**: a dedicated AWS member account under an Organization (not the ClickHouse test account).
 - **IaC**: Terraform.
 - **Backend**: Python. Core logic is plain, containerizable code behind a thin Lambda adapter, to ease the home-server migration.
 - **Auth for the web app**: Amazon Cognito.
-- **Parsing of bank text**: deferred.
-- **Receipts**: the user uploads a photo, Amazon Textract (AnalyzeExpense) extracts the text in memory, the user confirms, and only the resulting expense is stored. The image is never persisted. OCR sits behind an interface (`TicketReader`) so it can be swapped for Tesseract on the home server.
+- **Ingestion**: scheduled pull (EventBridge to Lambda) from BBVA, idempotent writes to DynamoDB. See [DATA-MODEL.md](DATA-MODEL.md).
+- **Bank consent**: PSD2 consent expires, so the app needs a "reconnect bank" flow and an alert before expiry.
+- **Receipts**: a photo is parsed in memory with Amazon Textract (AnalyzeExpense), the user confirms, and only the resulting expense is stored. The image is never persisted. OCR sits behind an interface (`TicketReader`).
 - **Frontend**: React + Vite + TypeScript, minimal, served from S3 + CloudFront.
 - **Single user.**
-- **Trigger**: the Wallet "Transaction" automation did not fire in a first test; the backend accepts a generic JSON payload so Wallet, Message or Email triggers can all feed it.
-- **Repository**: public on GitHub under `ipd02`. No secrets, account IDs, real transactions or tokens ever committed; synthetic fixtures only.
-- **Language**: English from now on.
+- **Repository**: public on GitHub. No secrets, account IDs, real transactions or tokens ever committed; synthetic fixtures only.
+- **Language**: English.
 
 ### Phases
 
-1. **Feasibility**: Wallet "Transaction" automations on the iPhone POSTing to a throwaway endpoint; verify over a few days that they fire reliably for all three cards.
-2. Minimal backend with Terraform: API Gateway, Lambda, DynamoDB, token stored securely.
-3. Web app with login (Cognito), expense list, categories, receipt upload parsed with Textract (not stored).
+1. **Feasibility** (done): local spike against Enable Banking; BBVA returns amount, date, counterparty and a stable ID.
+2. Minimal backend with Terraform: scheduled pull, DynamoDB, secrets in SSM.
+3. Bank consent flow (authorize, callback, renewal) and web app with login (Cognito), expense list, categories, receipt upload parsed with Textract (not stored).
 4. Hardening: KMS encryption, least privilege, rate limits, CloudTrail and alerts.
-5. Attack my own creation (threat model, API testing, file-upload abuse, token theft) and document findings and fixes.
+5. Attack my own creation (threat model, API testing, upload abuse, key and session theft) and document findings and fixes.
+
+See [IMPLEMENTATION-BRIEF.md](IMPLEMENTATION-BRIEF.md) for the build brief.
 
 Design the backend so it is not tightly bound to AWS (containers, IaC) to ease the migration.
 
