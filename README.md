@@ -33,6 +33,16 @@ This repository must never contain secrets, tokens, account credentials, Terrafo
 git config core.hooksPath .githooks
 ```
 
+## Development
+
+Requires Python 3.12, Terraform and gitleaks.
+
+```
+git config core.hooksPath .githooks   # enable the secret-scan hook
+make setup                            # create .venv, install pinned dev deps
+make check                            # lint, mypy, tests, terraform fmt/validate, gitleaks
+```
+
 ## License
 
 MIT
