@@ -24,6 +24,9 @@ tf-validate:
 	terraform -chdir=infra init -backend=false -input=false
 	terraform -chdir=infra validate
 
+tf-plan tf-apply tf-destroy:
+	AWS_PROFILE=expenses AWS_REGION=eu-west-1 scripts/tf.sh $(patsubst tf-%,%,$@)
+
 secrets:
 	gitleaks detect --source . --config .gitleaks.toml
 
