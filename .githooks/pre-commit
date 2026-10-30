@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Block commits that contain common secret patterns.
+patterns='AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|arn:aws:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:|aws_secret_access_key|Bearer [A-Za-z0-9._-]{20,}'
+if git diff --cached -U0 -- . ':!.githooks/pre-commit' | grep -E '^\+' | grep -Ev '^\+\+\+' | grep -Eq "$patterns"; then
+  echo "pre-commit: possible secret or AWS account identifier in staged changes:" >&2
+  git diff --cached -U0 -- . ':!.githooks/pre-commit' | grep -E '^\+' | grep -Ev '^\+\+\+' | grep -E "$patterns" >&2
+  exit 1
+fi
