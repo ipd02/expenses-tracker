@@ -32,4 +32,4 @@ files = ["core"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "--cov=core --cov-report=term-missing"
+addopts = "--cov=core --cov=adapters --cov-report=term-missing"

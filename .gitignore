@@ -29,3 +29,4 @@ web/dist/
 .coverage
 .mypy_cache/
 .ruff_cache/
+build/

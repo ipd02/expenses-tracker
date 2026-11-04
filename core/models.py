@@ -137,6 +137,15 @@ class ConsentSession:
 
 
 @dataclass(frozen=True)
+class BankSessionInfo:
+    """What the bank API reports about a session (never logged)."""
+
+    account_ids: tuple[str, ...]  # provider account uids
+    created_at: datetime
+    valid_until: datetime
+
+
+@dataclass(frozen=True)
 class ReceiptLine:
     description: str
     amount: Decimal

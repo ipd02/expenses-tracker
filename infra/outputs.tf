@@ -17,3 +17,11 @@ output "log_group_names" {
     pull = module.pull.log_group_name
   }
 }
+
+output "pull_function_name" {
+  value = aws_lambda_function.pull.function_name
+}
+
+output "alerts_topic_arn" {
+  value = aws_sns_topic.alerts.arn
+}
