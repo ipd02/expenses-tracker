@@ -6,12 +6,12 @@ Orchestrator log. No secrets, account IDs or real data here.
 |---|---|---|
 | 0 Tooling and guardrails | Merged | #1 |
 | 1 Core domain | Merged | #3 |
-| 2 Infra foundation | Code ready, CI green; blocked on owner (alert email, then first apply) | #2 |
+| 2 Infra foundation | Applied (8 added); budget subscription email pending owner confirmation | #2 |
 | 3 to 10 | Not started | |
 
-## Phase 2: waiting on owner
-Read-only plan: 8 to add, 0 to change, 0 to destroy (budget, DynamoDB table, 3 SSM SecureString placeholders, pull role, role policy, log group).
-Needs: real alert email in `infra/terraform.tfvars`, then apply, then confirm the budget subscription email.
+## Phase 2: applied
+Applied 2026-11-04 to eu-west-1: budget, DynamoDB table, 3 SSM SecureString placeholders, pull role, role policy, log group (8 added, 0 changed, 0 destroyed).
+Open: owner must confirm the budget SNS/email subscription; SSM placeholders still need real values before Phase 3 hits the bank API.
 
 ## Notes
 - Ingest raises on non-BOOK transactions; phase 3 filters pending ones first.
