@@ -23,5 +23,6 @@ esac
 
 export AWS_DEFAULT_REGION=eu-west-1
 root="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ "$cmd" != "destroy" ]]; then "$root/scripts/build_lambda.sh" >/dev/null; fi
 terraform -chdir="$root/infra" init -input=false >/dev/null
 exec terraform -chdir="$root/infra" "$cmd" "$@"

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import date, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from core.models import (
+    BankSessionInfo,
     ConsentSession,
     Direction,
     Expense,
@@ -70,3 +71,15 @@ class TicketReader(Protocol):
     """Reads a receipt image. Implemented in phase 7; image bytes must not be persisted."""
 
     def read(self, image_bytes: bytes, content_type: str) -> ParsedReceipt: ...
+
+
+class BankClient(Protocol):
+    """Read-only bank access. Raises ConsentInvalidError, RateLimitedError, BankUnavailableError."""
+
+    def get_session(self, session_id: str) -> BankSessionInfo: ...
+
+    def iter_transactions(self, account_uid: str, date_from: date) -> Iterator[Mapping[str, Any]]:
+        """All pages from date_from, lazily."""
+        ...
+
+    def get_balances(self, account_uid: str) -> Sequence[Mapping[str, Any]]: ...
