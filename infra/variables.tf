@@ -15,8 +15,8 @@ variable "monthly_budget_usd" {
 
 variable "pull_schedule_enabled" {
   type        = bool
-  default     = false
-  description = "Keep false until the real Enable Banking values are loaded into SSM"
+  default     = true
+  description = "Set false to pause scheduled pulls (for example while rotating the SSM secrets)"
 }
 
 variable "pull_schedule_expression" {
