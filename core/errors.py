@@ -18,7 +18,15 @@ class ValidationError(CoreError):
 
 
 class BankError(CoreError):
-    """A bank API call failed. Messages carry no payload, only the error kind."""
+    """A bank API call failed. Messages carry no payload, only the error kind.
+
+    `code` is the provider's enumerated error token (for example WRONG_TRANSACTIONS_PERIOD),
+    empty when unknown. It is safe to log; response bodies are not.
+    """
+
+    def __init__(self, message: str = "", code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class ConsentInvalidError(BankError):

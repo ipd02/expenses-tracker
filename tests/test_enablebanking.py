@@ -133,6 +133,7 @@ def test_balances(key: rsa.RSAPrivateKey) -> None:
         (503, None, BankUnavailableError, None),
         (408, "ASPSP_TIMEOUT", BankUnavailableError, None),
         (401, "UNAUTHORIZED_ACCESS", BankError, None),
+        (422, "WRONG_TRANSACTIONS_PERIOD", BankError, None),
     ],
 )
 def test_error_mapping(
@@ -159,3 +160,19 @@ def test_identifiers_are_validated(key: rsa.RSAPrivateKey, bad: str) -> None:
     with pytest.raises(BankError):
         client(key, t).get_session(bad)
     assert t.calls == []
+
+
+def test_unmapped_error_exposes_only_a_plain_code(key: rsa.RSAPrivateKey) -> None:
+    t = FakeTransport((422, {"message": "IBAN ES00 leaked", "error": "WRONG_TRANSACTIONS_PERIOD"}))
+    with pytest.raises(BankError) as exc:
+        client(key, t).get_balances(UID)
+    assert exc.value.code == "WRONG_TRANSACTIONS_PERIOD"
+    assert str(exc.value) == "bank request failed (422 WRONG_TRANSACTIONS_PERIOD)"
+
+
+@pytest.mark.parametrize("bad", ["lower case", "with spaces and 123", "X" * 100, "<script>"])
+def test_non_token_error_codes_are_dropped(key: rsa.RSAPrivateKey, bad: str) -> None:
+    t = FakeTransport((422, {"error": bad}))
+    with pytest.raises(BankError) as exc:
+        client(key, t).get_balances(UID)
+    assert exc.value.code == "" and str(exc.value) == "bank request failed (422)"

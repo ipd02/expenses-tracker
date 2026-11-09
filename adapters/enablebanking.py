@@ -29,6 +29,7 @@ MAX_PAGES = 100
 MAX_RESPONSE_BYTES = 5_000_000
 
 _ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+_CODE_RE = re.compile(r"[A-Z_]{1,64}")
 _EXPIRED_CODES = {"EXPIRED_SESSION"}
 _REVOKED_CODES = {"CLOSED_SESSION", "REVOKED_SESSION", "SESSION_DOES_NOT_EXIST"}
 _UNAVAILABLE_CODES = {"ASPSP_TIMEOUT", "ASPSP_ERROR"}
@@ -174,6 +175,8 @@ def _map_error(status: int, body: bytes) -> BankError:
             code = parsed["error"]
     except ValueError:
         pass
+    if not _CODE_RE.fullmatch(code):
+        code = ""  # only plain enumerated tokens are ever surfaced
     if code in _EXPIRED_CODES:
         return ConsentInvalidError("expired")
     if code in _REVOKED_CODES:
@@ -184,4 +187,5 @@ def _map_error(status: int, body: bytes) -> BankError:
         return BankUnavailableError(f"bank unavailable ({status})")
     # Anything else (bad JWT, unauthorized IP, wrong params) is a configuration/code bug:
     # fail loudly so the Lambda error alarm fires, without echoing the body.
-    return BankError(f"bank request failed ({status})")
+    detail = f"{status} {code}" if code else str(status)
+    return BankError(f"bank request failed ({detail})", code)
