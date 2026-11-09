@@ -55,11 +55,12 @@ def test_consent_failure_logs_error_and_returns_without_raising(
 def test_unexpected_failure_is_logged_without_details_and_reraised(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    d = deps(Bank([], BankError("IBAN ES00 secret")))
+    d = deps(Bank([], BankError("IBAN ES00 secret", "WRONG_TRANSACTIONS_PERIOD")))
     with caplog.at_level(logging.INFO, logger="expenses"), pytest.raises(BankError):
         handler({}, None, deps=d)
     text = " ".join(r.getMessage() for r in caplog.records)
     assert "pull_failed" in text and "IBAN" not in text and "secret" not in text
+    assert '"reason": "WRONG_TRANSACTIONS_PERIOD"' in text
 
 
 def test_logs_never_contain_transaction_content(
@@ -76,8 +77,9 @@ def test_logs_never_contain_transaction_content(
     ("event", "expected"),
     [
         ({}, 14),
-        ({"backfill_days": 365}, 365),
-        ({"backfill_days": 99999}, 400),
+        ({"backfill_days": 60}, 60),
+        ({"backfill_days": 365}, 89),
+        ({"backfill_days": 99999}, 89),
         ({"backfill_days": 0}, 1),
         ({"backfill_days": "x"}, 14),
         ({"backfill_days": None}, 14),

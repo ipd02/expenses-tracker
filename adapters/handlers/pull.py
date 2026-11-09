@@ -14,10 +14,13 @@ from adapters.dynamo import DynamoExpenseRepository, DynamoSessionStore
 from adapters.enablebanking import EnableBankingClient
 from adapters.safe_log import log
 from adapters.ssm import SsmSecrets
+from core.errors import BankError
 from core.pull import PullStatus, pull
 
 PROVIDER = "enablebanking"
-MAX_BACKFILL_DAYS = 400
+# The bank only serves history older than ~90 days right after the user authenticates;
+# unattended requests beyond that fail with WRONG_TRANSACTIONS_PERIOD.
+MAX_BACKFILL_DAYS = 89
 
 
 @dataclass
@@ -77,7 +80,8 @@ def handler(
             date_from=(now - timedelta(days=_lookback_days(event or {}))).date(),
         )
     except Exception as exc:
-        log("pull_failed", logging.ERROR, error_code=type(exc).__name__)
+        extra = {"reason": exc.code} if isinstance(exc, BankError) and exc.code else {}
+        log("pull_failed", logging.ERROR, error_code=type(exc).__name__, **extra)
         raise
     counters = {
         "accounts": result.accounts,
