@@ -33,6 +33,7 @@ class PullResult:
     accounts: int = 0
     inserted: int = 0
     skipped: int = 0  # already stored, or not booked
+    days_left: int | None = None  # whole days until the consent expires (OK runs only)
 
 
 def account_id_for(provider: str, account_uid: str) -> str:
@@ -42,13 +43,19 @@ def account_id_for(provider: str, account_uid: str) -> str:
 def _resolve_session(
     *,
     provider: str,
-    session_id: str,
+    load_session_id: Callable[[], str],
     bank: BankClient,
     sessions: SessionStore,
+    now: datetime,
 ) -> ConsentSession:
+    """Newest active session in the store, else the bootstrap id parked in SSM."""
+    active = sessions.get_active(provider, now)
+    if active is not None:
+        return active
+    session_id = load_session_id()
     existing = sessions.get(session_id)
     if existing is not None:
-        return existing
+        return existing  # known but no longer active: the caller reports consent_invalid
     info = bank.get_session(session_id)  # first sight of this id: register it
     session = ConsentSession(
         session_id=session_id,
@@ -72,14 +79,18 @@ def pull(
     date_from: date,
 ) -> PullResult:
     inserted = skipped = accounts = 0
-    session_id = load_session_id()
+    session: ConsentSession | None = None
     try:
         session = _resolve_session(
-            provider=provider, session_id=session_id, bank=bank, sessions=sessions
+            provider=provider,
+            load_session_id=load_session_id,
+            bank=bank,
+            sessions=sessions,
+            now=now,
         )
         if not session.is_active(now):
             if session.status is SessionStatus.ACTIVE:
-                sessions.mark_expired(session_id)
+                sessions.mark_expired(session.session_id)
             return PullResult(PullStatus.CONSENT_INVALID)
 
         for uid in session.account_ids:
@@ -94,14 +105,15 @@ def pull(
             skipped += result.skipped + (total - len(booked))
             accounts += 1
     except ConsentInvalidError as exc:
-        if sessions.get(session_id) is not None:
+        if session is not None:
             if exc.reason == "expired":
-                sessions.mark_expired(session_id)
+                sessions.mark_expired(session.session_id)
             else:
-                sessions.mark_revoked(session_id)
+                sessions.mark_revoked(session.session_id)
         return PullResult(PullStatus.CONSENT_INVALID, accounts, inserted, skipped)
     except RateLimitedError:
         return PullResult(PullStatus.RATE_LIMITED, accounts, inserted, skipped)
     except BankUnavailableError:
         return PullResult(PullStatus.BANK_UNAVAILABLE, accounts, inserted, skipped)
-    return PullResult(PullStatus.OK, accounts, inserted, skipped)
+    days_left = max(0, (session.expires_at - now).days)
+    return PullResult(PullStatus.OK, accounts, inserted, skipped, days_left)

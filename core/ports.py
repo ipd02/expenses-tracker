@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 
 from core.models import (
@@ -83,3 +83,29 @@ class BankClient(Protocol):
         ...
 
     def get_balances(self, account_uid: str) -> Sequence[Mapping[str, Any]]: ...
+
+
+class ConsentClient(Protocol):
+    """Starts and completes a bank consent. Raises BankError subclasses."""
+
+    def max_consent_validity(self, aspsp_name: str, country: str) -> timedelta: ...
+
+    def start_auth(
+        self, aspsp_name: str, country: str, state: str, redirect_url: str, valid_until: datetime
+    ) -> str:
+        """Returns the bank URL the user must open to approve the consent."""
+        ...
+
+    def create_session(self, code: str) -> tuple[str, BankSessionInfo]:
+        """Exchange the callback code for (session_id, info)."""
+        ...
+
+
+class ConsentAttemptStore(Protocol):
+    """Single-use `state` values for in-flight consents (CSRF protection)."""
+
+    def create(self, state: str, expires_at: datetime) -> None: ...
+
+    def consume(self, state: str, now: datetime) -> bool:
+        """Atomically remove the state. True only if it existed and had not expired."""
+        ...

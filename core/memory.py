@@ -119,3 +119,15 @@ class InMemorySessionStore:
     def list(self, provider: str | None = None) -> Sequence[ConsentSession]:
         out = [s for s in self._items.values() if provider is None or s.provider == provider]
         return sorted(out, key=lambda s: s.created_at)
+
+
+class InMemoryConsentAttemptStore:
+    def __init__(self) -> None:
+        self._items: dict[str, datetime] = {}
+
+    def create(self, state: str, expires_at: datetime) -> None:
+        self._items[state] = expires_at
+
+    def consume(self, state: str, now: datetime) -> bool:
+        expires_at = self._items.pop(state, None)
+        return expires_at is not None and now < expires_at
