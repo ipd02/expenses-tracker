@@ -10,3 +10,18 @@ Decisions that supplement [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md).
 4. **Secret scanning in two layers:** the local `.githooks/pre-commit` hook (fast regex check) and gitleaks with default rules (`.gitleaks.toml`, allowlist only for the hook file, which contains the patterns).
 5. **Python tooling:** setuptools, Python >= 3.12, ruff (lint and format, including the `S` security rules), mypy strict on `core/`, pytest with coverage. Dev dependencies are pinned exactly in `requirements-dev.txt`. A test statically enforces that `core/` has no AWS imports.
 6. **`make check`** runs everything CI runs, plus the local gitleaks scan.
+
+## Phase 3
+
+7. **Unattended history is limited to under 90 days.** A 365-day request fails with `WRONG_TRANSACTIONS_PERIOD`; long history is only available right after the user authenticates. Manual backfill is capped at 89 days and the scheduled pull looks back 14 days.
+8. **The pull runs 3 times a day** (`rate(8 hours)`), under the roughly 4 unattended refreshes per account per day. Lambda retries are off; the next tick is the retry.
+9. **Bank error codes are logged as tokens, bodies never.** `BankError.code` holds only a plain `[A-Z_]` token.
+
+## Phase 4
+
+10. **Starting a consent is not a public endpoint.** Only `GET /callback` is public. Starting is a direct Lambda invoke (`make connect-bank`), authenticated by the owner's AWS credentials. An open start route would let anyone link their own bank account to this app and poison the data. Phase 5 adds an authenticated (Cognito) start route for the UI.
+11. **`state` is stored in DynamoDB and consumed with a conditional delete**, so it is single use even under concurrent callbacks. It expires after 15 minutes (checked explicitly, because DynamoDB TTL cleanup is lazy). A malformed code does not burn the state; a failed bank exchange does.
+12. **The callback never echoes input**, returns fixed pages with `no-store`, CSP `default-src 'none'`, `nosniff`, `no-referrer` and frame denial, is throttled to 2 requests per second (burst 5), and has no access logs because the query string carries the one-time code.
+13. **The pull prefers the newest active session in the table.** The SSM `session` parameter is now only a bootstrap for the first session. Sessions carry `gsi1pk = SESSIONS#<provider>` so lookups are a query, not a scan.
+14. **Expiry reminders come from the pull.** After a successful run it logs `consent_expiring` (14 days or fewer left) and `consent_expiring_soon` (3 days or fewer); one-day-period alarms email once per threshold. Expired or revoked consent still raises the existing `consent_invalid` alarm.
+15. **Consent runs in its own Lambda and role.** It reads only the app id and key (not the session parameter) and writes only consent state and sessions.

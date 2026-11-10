@@ -13,7 +13,17 @@ import re
 _LOGGER = logging.getLogger("expenses")
 _LOGGER.setLevel(logging.INFO)  # Lambda's root default (WARNING) would drop run summaries
 ALLOWED_FIELDS = frozenset(
-    {"status", "accounts", "inserted", "skipped", "http_status", "error_code", "reason", "pages"}
+    {
+        "status",
+        "accounts",
+        "inserted",
+        "skipped",
+        "http_status",
+        "error_code",
+        "reason",
+        "pages",
+        "days_left",
+    }
 )
 _TOKEN_RE = re.compile(r"[A-Za-z_]{1,64}")
 

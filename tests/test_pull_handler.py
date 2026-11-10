@@ -37,8 +37,15 @@ def deps(bank: Bank) -> Deps:
 
 def test_scheduled_run_ingests_then_second_run_inserts_nothing(txs: dict[str, Any]) -> None:
     d = deps(Bank(list(txs.values())))
-    assert handler({}, None, deps=d) == {"status": "ok", "accounts": 1, "inserted": 6, "skipped": 0}
-    assert handler({}, None, deps=d) == {"status": "ok", "accounts": 1, "inserted": 0, "skipped": 6}
+    first = handler({}, None, deps=d)
+    assert {k: first[k] for k in ("status", "accounts", "inserted", "skipped")} == {
+        "status": "ok",
+        "accounts": 1,
+        "inserted": 6,
+        "skipped": 0,
+    }
+    second = handler({}, None, deps=d)
+    assert (second["inserted"], second["skipped"]) == (0, 6)
 
 
 def test_consent_failure_logs_error_and_returns_without_raising(
@@ -87,3 +94,35 @@ def test_logs_never_contain_transaction_content(
 )
 def test_lookback_days(event: dict[str, Any], expected: int) -> None:
     assert _lookback_days(event) == expected
+
+
+@pytest.mark.parametrize(
+    ("days", "event"),
+    [
+        (60, None),
+        (14, "consent_expiring"),
+        (4, "consent_expiring"),
+        (3, "consent_expiring_soon"),
+        (0, "consent_expiring_soon"),
+    ],
+)
+def test_expiry_reminders(
+    txs: dict[str, Any], caplog: pytest.LogCaptureFixture, days: int, event: str | None
+) -> None:
+    class ShortBank(Bank):
+        def get_session(self, session_id: str) -> BankSessionInfo:
+            now = datetime.now(UTC)
+            return BankSessionInfo(
+                ("uid-1",), now - timedelta(days=30), now + timedelta(days=days, hours=2)
+            )
+
+    with caplog.at_level(logging.INFO, logger="expenses"):
+        out = handler({}, None, deps=deps(ShortBank(list(txs.values()))))
+    assert out["days_left"] == days
+    names = [r.getMessage() for r in caplog.records]
+    reminders = [m for m in names if "consent_expiring" in m]
+    if event is None:
+        assert reminders == []
+    else:
+        assert len(reminders) == 1 and f'"event": "{event}"' in reminders[0]
+        assert f'"days_left": {days}' in reminders[0]

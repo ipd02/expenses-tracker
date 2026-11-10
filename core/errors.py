@@ -46,3 +46,7 @@ class RateLimitedError(BankError):
 
 class BankUnavailableError(BankError):
     """Transient bank/API failure (5xx, timeout). The next scheduled run tries again."""
+
+
+class ConsentCallbackError(CoreError):
+    """The consent callback is invalid: bad shape, unknown, expired or already used state."""

@@ -25,3 +25,12 @@ output "pull_function_name" {
 output "alerts_topic_arn" {
   value = aws_sns_topic.alerts.arn
 }
+
+output "consent_redirect_url" {
+  value       = "${aws_apigatewayv2_api.consent.api_endpoint}/callback"
+  description = "Register this exact URL as the redirect URL in the Enable Banking Control Panel"
+}
+
+output "consent_function_name" {
+  value = aws_lambda_function.consent.function_name
+}

@@ -1,6 +1,6 @@
 PY := .venv/bin
 
-.PHONY: setup lint typecheck test tf-fmt tf-validate secrets check
+.PHONY: setup lint typecheck test tf-fmt tf-validate secrets check connect-bank
 
 setup:
 	python3.12 -m venv .venv
@@ -26,6 +26,9 @@ tf-validate:
 
 tf-plan tf-apply tf-destroy:
 	AWS_PROFILE=expenses AWS_REGION=eu-west-1 scripts/tf.sh $(patsubst tf-%,%,$@)
+
+connect-bank:
+	AWS_PROFILE=expenses AWS_REGION=eu-west-1 scripts/connect_bank.sh
 
 secrets:
 	gitleaks detect --source . --config .gitleaks.toml

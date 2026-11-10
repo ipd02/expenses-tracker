@@ -18,6 +18,7 @@ from core.models import ConsentSession, Expense, SessionStatus
 
 EXPENSE_PK = "ACCOUNT#"
 SESSION_PK = "SESSION#"
+CONSENT_PK = "CONSENT#"
 
 
 def _split_source_key(source_key: str) -> tuple[str, str] | None:
@@ -101,6 +102,9 @@ def _session_item(session: ConsentSession) -> dict[str, Any]:
         "created_at": session.created_at.isoformat(),
         "expires_at": session.expires_at.isoformat(),
         "status": session.status.value,
+        # gsi1 lists a provider's sessions (oldest first) without a table scan.
+        "gsi1pk": f"SESSIONS#{session.provider}",
+        "gsi1sk": session.created_at.isoformat(),
     }
 
 
@@ -128,18 +132,26 @@ class DynamoSessionStore:
         return _session_from_item(item) if item else None
 
     def list(self, provider: str | None = None) -> Sequence[ConsentSession]:
-        kwargs: dict[str, Any] = {
-            "FilterExpression": "begins_with(pk, :p) AND sk = :m",
-            "ExpressionAttributeValues": {":p": SESSION_PK, ":m": "META"},
-        }
         out: list[ConsentSession] = []
-        while True:  # a handful of sessions: a filtered scan is fine
-            resp = self._table.scan(**kwargs)
+        if provider is not None:
+            kwargs: dict[str, Any] = {
+                "IndexName": "gsi1",
+                "KeyConditionExpression": "gsi1pk = :p",
+                "ExpressionAttributeValues": {":p": f"SESSIONS#{provider}"},
+            }
+            run = self._table.query
+        else:  # only used by tooling: a handful of sessions, so a filtered scan is fine
+            kwargs = {
+                "FilterExpression": "begins_with(pk, :p) AND sk = :m",
+                "ExpressionAttributeValues": {":p": SESSION_PK, ":m": "META"},
+            }
+            run = self._table.scan
+        while True:
+            resp = run(**kwargs)
             out.extend(_session_from_item(i) for i in resp["Items"])
             if "LastEvaluatedKey" not in resp:
                 break
             kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-        out = [s for s in out if provider is None or s.provider == provider]
         return sorted(out, key=lambda s: s.created_at)
 
     def get_active(self, provider: str, now: datetime) -> ConsentSession | None:
@@ -169,3 +181,33 @@ class DynamoSessionStore:
 
     def mark_revoked(self, session_id: str) -> ConsentSession:
         return self._mark(session_id, SessionStatus.REVOKED)
+
+
+class DynamoConsentAttemptStore:
+    """In-flight consent `state` values. Single use is enforced by a conditional delete."""
+
+    def __init__(self, table: Any) -> None:
+        self._table = table
+
+    def create(self, state: str, expires_at: datetime) -> None:
+        self._table.put_item(
+            Item={
+                "pk": f"{CONSENT_PK}{state}",
+                "sk": "META",
+                "expires_at": expires_at.isoformat(),
+                "ttl": int(expires_at.timestamp()) + 3600,  # DynamoDB cleans up lazily
+            }
+        )
+
+    def consume(self, state: str, now: datetime) -> bool:
+        try:
+            resp = self._table.delete_item(
+                Key={"pk": f"{CONSENT_PK}{state}", "sk": "META"},
+                ConditionExpression="attribute_exists(pk)",
+                ReturnValues="ALL_OLD",
+            )
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+        return now < datetime.fromisoformat(resp["Attributes"]["expires_at"])

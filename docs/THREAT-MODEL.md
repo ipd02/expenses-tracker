@@ -34,7 +34,7 @@ Initial draft from phase 0. Revisited and tested in phase 9; every threat is `un
 
 | ID | Threat | Mitigation planned (phase) | Status |
 |---|---|---|---|
-| T1 | Forged or replayed consent callback (missing or reused `state`, callback hitting another user's session) | Unguessable single-use `state` bound to the session with expiry (phases 3-4) | untested |
+| T1 | Forged or replayed consent callback (missing or reused `state`, callback hitting another user's session) | Unguessable single-use `state`, stored server-side, consumed atomically, 15-minute expiry; start is IAM-only, not public (phase 4) | unit-tested (replay, forgery, expiry, race); live test pending |
 | T2 | JWT tampering, `alg` confusion, expired or wrong-audience tokens accepted | API Gateway JWT authorizer pinned to the Cognito issuer and audience; no custom token parsing (phases 4-5) | untested |
 | T3 | Authorization bypass (access without a token, access to data of another identity, unauthenticated routes) | All routes behind the authorizer; owner-scoped data access; deny by default (phases 4-5) | untested |
 | T4 | XSS through counterparty or remittance text rendered in the UI | Render as text only (React escaping, no raw HTML sinks), strict CSP on CloudFront (phases 6, 8) | untested |

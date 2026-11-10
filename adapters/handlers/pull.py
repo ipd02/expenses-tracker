@@ -8,16 +8,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import boto3
-
 from adapters.dynamo import DynamoExpenseRepository, DynamoSessionStore
-from adapters.enablebanking import EnableBankingClient
+from adapters.handlers import wiring
 from adapters.safe_log import log
 from adapters.ssm import SsmSecrets
 from core.errors import BankError
 from core.pull import PullStatus, pull
 
-PROVIDER = "enablebanking"
+PROVIDER = wiring.PROVIDER
+EXPIRING_DAYS = 14
+EXPIRING_SOON_DAYS = 3
 # The bank only serves history older than ~90 days right after the user authenticates;
 # unattended requests beyond that fail with WRONG_TRANSACTIONS_PERIOD.
 MAX_BACKFILL_DAYS = 89
@@ -32,26 +32,15 @@ class Deps:
     session_param: str
 
 
-_cache: Deps | None = None
-
-
 def _default_deps() -> Deps:
-    global _cache  # reused across warm invocations
-    if _cache is None:
-        secrets = SsmSecrets(boto3.client("ssm"))
-        table = boto3.resource("dynamodb").Table(os.environ["TABLE_NAME"])
-        bank = EnableBankingClient(
-            secrets.get(os.environ["SSM_APP_ID"]),
-            secrets.get(os.environ["SSM_PRIVATE_KEY"]).encode(),
-        )
-        _cache = Deps(
-            bank,
-            DynamoExpenseRepository(table),
-            DynamoSessionStore(table),
-            secrets,
-            os.environ["SSM_SESSION"],
-        )
-    return _cache
+    table = wiring.table()
+    return Deps(
+        wiring.bank(),
+        DynamoExpenseRepository(table),
+        DynamoSessionStore(table),
+        wiring.secrets(),
+        os.environ["SSM_SESSION"],
+    )
 
 
 def _lookback_days(event: dict[str, Any]) -> int:
@@ -90,9 +79,18 @@ def handler(
     }
     if result.status is PullStatus.OK:
         log("pull_finished", status=result.status.value, **counters)
+        days = result.days_left
+        if days is not None and days <= EXPIRING_SOON_DAYS:
+            # Matched by a CloudWatch metric filter that emails the owner to reconnect.
+            log("consent_expiring_soon", logging.WARNING, days_left=days)
+        elif days is not None and days <= EXPIRING_DAYS:
+            log("consent_expiring", logging.WARNING, days_left=days)
     elif result.status is PullStatus.CONSENT_INVALID:
         # Matched by the CloudWatch metric filter that raises the reconnect alert.
         log("consent_invalid", logging.ERROR, status=result.status.value, **counters)
     else:
         log("pull_incomplete", logging.WARNING, status=result.status.value, **counters)
-    return {"status": result.status.value, **counters}
+    summary: dict[str, int | str] = {"status": result.status.value, **counters}
+    if result.days_left is not None:
+        summary["days_left"] = result.days_left
+    return summary

@@ -143,3 +143,30 @@ def test_transient_errors_stop_without_marking_session(
     assert result.status is status
     stored = sessions.get(SID)
     assert stored is not None and stored.status is SessionStatus.ACTIVE
+
+
+def test_store_session_is_preferred_over_the_bootstrap_id(txs: dict[str, Any]) -> None:
+    from core.models import ConsentSession
+
+    repo, sessions = InMemoryExpenseRepository(), InMemorySessionStore()
+    sessions.save(
+        ConsentSession(
+            "reconnected-session",
+            "enablebanking",
+            (UID,),
+            NOW - timedelta(days=1),
+            NOW + timedelta(days=80),
+        )
+    )
+    bank = FakeBank(list(txs.values()))
+    result = run(bank, repo, sessions)  # SSM would say SID, but the store has a newer session
+    assert result.status is PullStatus.OK and bank.session_calls == 0
+    assert sessions.get(SID) is None
+
+
+def test_days_left_is_reported(txs: dict[str, Any]) -> None:
+    repo, sessions = InMemoryExpenseRepository(), InMemorySessionStore()
+    result = run(
+        FakeBank(list(txs.values()), valid_until=NOW + timedelta(days=12, hours=5)), repo, sessions
+    )
+    assert result.days_left == 12
