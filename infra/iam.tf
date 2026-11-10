@@ -18,3 +18,25 @@ module "pull" {
     },
   ]
 }
+
+# consent: starts a consent (direct invoke by the owner) and completes it from the public
+# callback. It can read only the app id and key, never the session parameter, and write only
+# consent state and sessions to the table.
+module "consent" {
+  source = "./modules/lambda_function_base"
+
+  name = "consent"
+
+  policy_statements = [
+    {
+      sid       = "ConsentStateAndSessions"
+      actions   = ["dynamodb:PutItem", "dynamodb:DeleteItem"]
+      resources = [aws_dynamodb_table.main.arn]
+    },
+    {
+      sid       = "ReadAppCredentials"
+      actions   = ["ssm:GetParameter"]
+      resources = [aws_ssm_parameter.secret["app_id"].arn, aws_ssm_parameter.secret["privkey"].arn]
+    },
+  ]
+}
