@@ -8,7 +8,11 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from adapters.dynamo import DynamoExpenseRepository, DynamoSessionStore
+from adapters.dynamo import (
+    DynamoConsentAttemptStore,
+    DynamoExpenseRepository,
+    DynamoSessionStore,
+)
 from core.errors import NotFoundError
 from core.models import ConsentSession, SessionStatus
 from core.normalize import normalize_transaction
@@ -118,3 +122,38 @@ def test_mark_expired_and_revoked(table: Any) -> None:
     assert store.get_active("enablebanking", NOW) is None
     with pytest.raises(NotFoundError):
         store.mark_expired("nope")
+
+
+def test_consent_state_is_single_use_and_expires(table: Any) -> None:
+    store = DynamoConsentAttemptStore(table)
+    store.create("state-a", NOW + timedelta(minutes=15))
+    assert store.consume("state-a", NOW) is True
+    assert store.consume("state-a", NOW) is False  # replay
+    assert store.consume("never-created", NOW) is False
+    store.create("state-b", NOW + timedelta(minutes=15))
+    assert store.consume("state-b", NOW + timedelta(minutes=15)) is False  # expired, still burned
+    assert store.consume("state-b", NOW) is False
+
+
+def test_consent_state_race_has_one_winner(table: Any) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = DynamoConsentAttemptStore(table)
+    store.create("state-r", NOW + timedelta(minutes=15))
+    with ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(lambda _: store.consume("state-r", NOW), range(8)))
+    assert results.count(True) == 1
+
+
+def test_sessions_are_listed_through_the_index_not_a_scan(table: Any) -> None:
+    store = DynamoSessionStore(table)
+    store.save(make_session("s1", 30))
+    item = table.get_item(Key={"pk": "SESSION#s1", "sk": "META"})["Item"]
+    assert item["gsi1pk"] == "SESSIONS#enablebanking"
+    # a legacy item without the index keys is still found by id, just not listed
+    table.put_item(
+        Item={k: v for k, v in item.items() if not k.startswith("gsi1")} | {"pk": "SESSION#old"}
+    )
+    assert store.get("old") is not None
+    assert [s.session_id for s in store.list("enablebanking")] == ["s1"]
+    assert {s.session_id for s in store.list()} == {"s1", "old"}

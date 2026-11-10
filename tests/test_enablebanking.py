@@ -38,9 +38,13 @@ class FakeTransport:
     def __init__(self, *responses: tuple[int, Any]) -> None:
         self.responses = list(responses)
         self.calls: list[tuple[str, Mapping[str, str]]] = []
+        self.requests: list[tuple[str, str, bytes | None]] = []
 
-    def __call__(self, url: str, headers: Mapping[str, str]) -> tuple[int, bytes]:
+    def __call__(
+        self, method: str, url: str, headers: Mapping[str, str], body: bytes | None
+    ) -> tuple[int, bytes]:
         self.calls.append((url, headers))
+        self.requests.append((method, url, body))
         status, body = self.responses.pop(0)
         return status, body if isinstance(body, bytes) else json.dumps(body).encode()
 
@@ -176,3 +180,93 @@ def test_non_token_error_codes_are_dropped(key: rsa.RSAPrivateKey, bad: str) -> 
     with pytest.raises(BankError) as exc:
         client(key, t).get_balances(UID)
     assert exc.value.code == "" and str(exc.value) == "bank request failed (422)"
+
+
+def test_max_consent_validity(key: rsa.RSAPrivateKey) -> None:
+    t = FakeTransport(
+        (
+            200,
+            {
+                "aspsps": [
+                    {"name": "Other", "maximum_consent_validity": 100},
+                    {"name": "BBVA", "maximum_consent_validity": 7776000},
+                ]
+            },
+        )
+    )
+    assert client(key, t).max_consent_validity("BBVA", "ES").days == 90
+    assert t.requests[0][0] == "GET" and "country=ES" in t.requests[0][1]
+
+
+@pytest.mark.parametrize(
+    "aspsps",
+    [[], [{"name": "BBVA"}], [{"name": "BBVA", "maximum_consent_validity": 0}], ["junk"]],
+)
+def test_max_consent_validity_unknown_bank(key: rsa.RSAPrivateKey, aspsps: list[Any]) -> None:
+    with pytest.raises(BankError):
+        client(key, FakeTransport((200, {"aspsps": aspsps}))).max_consent_validity("BBVA", "ES")
+
+
+def test_start_auth_posts_the_expected_body(key: rsa.RSAPrivateKey) -> None:
+    t = FakeTransport((200, {"url": "https://bank.example/approve"}))
+    url = client(key, t).start_auth("BBVA", "ES", "state-1", "https://cb.example/callback", NOW)
+    assert url == "https://bank.example/approve"
+    method, target, body = t.requests[0]
+    assert method == "POST" and target == f"{BASE_URL}/auth"
+    sent = json.loads(body or b"")
+    assert sent["state"] == "state-1" and sent["redirect_url"] == "https://cb.example/callback"
+    assert sent["aspsp"] == {"name": "BBVA", "country": "ES"} and sent["psu_type"] == "personal"
+    assert sent["access"]["valid_until"] == NOW.isoformat()
+    assert t.calls[0][1]["Content-Type"] == "application/json"
+
+
+@pytest.mark.parametrize("body", [{}, {"url": 1}, {"url": "http://insecure.example"}])
+def test_start_auth_rejects_bad_urls(key: rsa.RSAPrivateKey, body: dict[str, Any]) -> None:
+    with pytest.raises(BankError):
+        client(key, FakeTransport((200, body))).start_auth("BBVA", "ES", "s", "https://x", NOW)
+
+
+def test_start_auth_validates_country(key: rsa.RSAPrivateKey) -> None:
+    t = FakeTransport()
+    with pytest.raises(BankError):
+        client(key, t).start_auth("BBVA", "es/../x", "s", "https://x", NOW)
+    assert t.requests == []
+
+
+def test_create_session_accepts_account_objects(key: rsa.RSAPrivateKey) -> None:
+    t = FakeTransport(
+        (
+            200,
+            {
+                "session_id": "sess-9",
+                "accounts": [{"uid": UID, "iban": "ES00"}],
+                "access": {"valid_until": "2027-02-01T10:00:00Z"},
+            },
+        )
+    )
+    session_id, info = client(key, t).create_session("the-code")
+    assert session_id == "sess-9" and info.account_ids == (UID,) and info.created_at == NOW
+    assert json.loads(t.requests[0][2] or b"") == {"code": "the-code"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"accounts": [], "access": {"valid_until": "2027-02-01T10:00:00Z"}},
+        {"session_id": "s", "accounts": "x", "access": {"valid_until": "2027-02-01T10:00:00Z"}},
+        {
+            "session_id": "s",
+            "accounts": [{"no": "uid"}],
+            "access": {"valid_until": "2027-02-01T10:00:00Z"},
+        },
+        {"session_id": "s", "accounts": [UID], "access": {"valid_until": "garbage"}},
+        {
+            "session_id": "../s",
+            "accounts": [UID],
+            "access": {"valid_until": "2027-02-01T10:00:00Z"},
+        },
+    ],
+)
+def test_create_session_rejects_bad_shapes(key: rsa.RSAPrivateKey, body: dict[str, Any]) -> None:
+    with pytest.raises(BankError):
+        client(key, FakeTransport((200, body))).create_session("c")

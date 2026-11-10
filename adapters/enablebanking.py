@@ -37,13 +37,17 @@ _BAD_SESSION_STATUSES = {"EXPIRED": "expired"}  # anything else not AUTHORIZED c
 
 
 class Transport(Protocol):
-    def __call__(self, url: str, headers: Mapping[str, str]) -> tuple[int, bytes]: ...
+    def __call__(
+        self, method: str, url: str, headers: Mapping[str, str], body: bytes | None
+    ) -> tuple[int, bytes]: ...
 
 
-def urllib_transport(url: str, headers: Mapping[str, str]) -> tuple[int, bytes]:
+def urllib_transport(
+    method: str, url: str, headers: Mapping[str, str], body: bytes | None = None
+) -> tuple[int, bytes]:
     if not url.startswith(BASE_URL + "/"):
         raise BankError("refusing request outside the Enable Banking API")
-    request = urllib.request.Request(url, headers=dict(headers), method="GET")  # noqa: S310
+    request = urllib.request.Request(url, data=body, headers=dict(headers), method=method)  # noqa: S310
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as resp:  # noqa: S310
             return resp.status, resp.read(MAX_RESPONSE_BYTES)
@@ -83,6 +87,23 @@ def _check_id(value: str) -> str:
     return value
 
 
+_COUNTRY_RE = re.compile(r"[A-Z]{2}")
+
+
+def _account_uid(account: object) -> str:
+    """POST /sessions returns account objects; GET /sessions returns bare uids."""
+    uid = account.get("uid") if isinstance(account, Mapping) else account
+    if not isinstance(uid, str):
+        raise BankError("unexpected response shape")
+    return _check_id(uid)
+
+
+def _check_country(value: str) -> str:
+    if not _COUNTRY_RE.fullmatch(value):
+        raise BankError("invalid country")
+    return value
+
+
 def _parse_time(value: object) -> datetime:
     if not isinstance(value, str):
         raise BankError("unexpected response shape")
@@ -110,14 +131,29 @@ class EnableBankingClient:
         self._clock = clock
 
     def _get(self, path: str, params: Mapping[str, str] | None = None) -> dict[str, Any]:
+        return self._request("GET", path, params, None)
+
+    def _post(self, path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self._request("POST", path, None, payload)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        params: Mapping[str, str] | None,
+        payload: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
         url = BASE_URL + path
         if params:
             url += "?" + urllib.parse.urlencode(params)
         token = sign_jwt(self._key, self._app_id, self._clock())
-        status, body = self._transport(
-            url, {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        )
-        if status == 200:
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        data = None
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(payload).encode()
+        status, body = self._transport(method, url, headers, data)
+        if status in (200, 201):
             try:
                 data = json.loads(body)
             except ValueError as exc:
@@ -165,6 +201,47 @@ class EnableBankingClient:
         if not isinstance(balances, list):
             raise BankError("unexpected response shape")
         return [b for b in balances if isinstance(b, dict)]
+
+    def max_consent_validity(self, aspsp_name: str, country: str) -> timedelta:
+        data = self._get("/aspsps", {"country": _check_country(country)})
+        for aspsp in data.get("aspsps", []):
+            if isinstance(aspsp, Mapping) and aspsp.get("name") == aspsp_name:
+                seconds = aspsp.get("maximum_consent_validity")
+                if isinstance(seconds, int) and not isinstance(seconds, bool) and seconds > 0:
+                    return timedelta(seconds=seconds)
+                break
+        raise BankError("bank not found or has no consent validity")
+
+    def start_auth(
+        self, aspsp_name: str, country: str, state: str, redirect_url: str, valid_until: datetime
+    ) -> str:
+        data = self._post(
+            "/auth",
+            {
+                "access": {"valid_until": valid_until.isoformat()},
+                "aspsp": {"name": aspsp_name, "country": _check_country(country)},
+                "state": state,
+                "redirect_url": redirect_url,
+                "psu_type": "personal",
+            },
+        )
+        url = data.get("url")
+        if not isinstance(url, str) or not url.startswith("https://"):
+            raise BankError("unexpected response shape")
+        return url
+
+    def create_session(self, code: str) -> tuple[str, BankSessionInfo]:
+        data = self._post("/sessions", {"code": code})
+        session_id = data.get("session_id")
+        access = data.get("access")
+        accounts = data.get("accounts")
+        if not isinstance(session_id, str) or not isinstance(access, Mapping):
+            raise BankError("unexpected response shape")
+        if not isinstance(accounts, list):
+            raise BankError("unexpected response shape")
+        uids = tuple(_account_uid(a) for a in accounts)
+        info = BankSessionInfo(uids, self._clock(), _parse_time(access.get("valid_until")))
+        return _check_id(session_id), info
 
 
 def _map_error(status: int, body: bytes) -> BankError:
