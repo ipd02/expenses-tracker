@@ -270,3 +270,19 @@ def test_create_session_accepts_account_objects(key: rsa.RSAPrivateKey) -> None:
 def test_create_session_rejects_bad_shapes(key: rsa.RSAPrivateKey, body: dict[str, Any]) -> None:
     with pytest.raises(BankError):
         client(key, FakeTransport((200, body))).create_session("c")
+
+
+def test_account_key_is_a_stable_hash_of_the_identification(key: rsa.RSAPrivateKey) -> None:
+    body = {"uid": UID, "identification_hash": "bank-ident-hash"}
+    k1 = client(key, FakeTransport((200, body))).get_account_key(UID)
+    k2 = client(key, FakeTransport((200, {**body, "uid": "other"}))).get_account_key("other-uid")
+    assert k1 == k2 and len(k1) == 32 and "bank-ident" not in k1
+    t = FakeTransport((200, body))
+    client(key, t).get_account_key(UID)
+    assert t.requests[0][1].endswith(f"/accounts/{UID}/details")
+
+
+@pytest.mark.parametrize("body", [{}, {"identification_hash": ""}, {"identification_hash": 5}])
+def test_account_key_rejects_bad_shapes(key: rsa.RSAPrivateKey, body: dict[str, Any]) -> None:
+    with pytest.raises(BankError):
+        client(key, FakeTransport((200, body))).get_account_key(UID)

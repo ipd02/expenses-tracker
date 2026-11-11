@@ -7,6 +7,7 @@ response. Response bodies and URLs are never put into exception messages or logs
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import urllib.error
@@ -96,6 +97,11 @@ def _account_uid(account: object) -> str:
     if not isinstance(uid, str):
         raise BankError("unexpected response shape")
     return _check_id(uid)
+
+
+def account_key_from_identification(identification_hash: str) -> str:
+    """Hash again so the bank's identifier never lands in a storage key or a log line."""
+    return hashlib.sha256(identification_hash.encode()).hexdigest()[:32]
 
 
 def _check_country(value: str) -> str:
@@ -201,6 +207,13 @@ class EnableBankingClient:
         if not isinstance(balances, list):
             raise BankError("unexpected response shape")
         return [b for b in balances if isinstance(b, dict)]
+
+    def get_account_key(self, account_uid: str) -> str:
+        data = self._get(f"/accounts/{_check_id(account_uid)}/details")
+        ident = data.get("identification_hash")
+        if not isinstance(ident, str) or not ident or len(ident) > 1024:
+            raise BankError("unexpected response shape")
+        return account_key_from_identification(ident)
 
     def max_consent_validity(self, aspsp_name: str, country: str) -> timedelta:
         data = self._get("/aspsps", {"country": _check_country(country)})

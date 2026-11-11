@@ -9,12 +9,13 @@ import pytest
 
 from core.errors import BankUnavailableError, ConsentInvalidError, RateLimitedError
 from core.memory import InMemoryExpenseRepository, InMemorySessionStore
-from core.models import BankSessionInfo, SessionStatus
+from core.models import BankSessionInfo, ConsentSession, SessionStatus
 from core.pull import PullStatus, account_id_for, pull
 
 NOW = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
 SID = "session-0001"
 UID = "00000000-0000-0000-0000-000000000000"
+KEY = "k" * 32
 
 
 class FakeBank:
@@ -32,6 +33,8 @@ class FakeBank:
         self.fail_after = fail_after
         self.session_calls = 0
         self.tx_calls = 0
+        self.key_calls = 0
+        self.keys = {UID: KEY}
 
     def get_session(self, session_id: str) -> BankSessionInfo:
         self.session_calls += 1
@@ -48,6 +51,10 @@ class FakeBank:
 
     def get_balances(self, account_uid: str) -> Sequence[Mapping[str, Any]]:
         return []
+
+    def get_account_key(self, account_uid: str) -> str:
+        self.key_calls += 1
+        return self.keys[account_uid]
 
 
 def run(bank: FakeBank, repo: InMemoryExpenseRepository, sessions: InMemorySessionStore) -> Any:
@@ -69,7 +76,7 @@ def test_first_run_registers_session_and_ingests(txs: dict[str, Any]) -> None:
     assert (result.accounts, result.inserted, result.skipped) == (1, 6, 0)
     saved = sessions.get(SID)
     assert saved is not None and saved.account_ids == (UID,)
-    assert all(e.account_id == account_id_for("enablebanking", UID) for e in repo.list())
+    assert all(e.account_id == account_id_for("enablebanking", KEY) for e in repo.list())
 
 
 def test_second_run_inserts_nothing_and_reuses_session(txs: dict[str, Any]) -> None:
@@ -88,7 +95,7 @@ def test_pending_transactions_are_filtered(txs: dict[str, Any]) -> None:
     repo, sessions = InMemoryExpenseRepository(), InMemorySessionStore()
     result = run(FakeBank([*txs.values(), pending]), repo, sessions)
     assert (result.inserted, result.skipped) == (6, 1)
-    assert repo.get(account_id_for("enablebanking", UID) + "REF-PENDING") is None
+    assert repo.get(account_id_for("enablebanking", KEY) + "REF-PENDING") is None
 
 
 @pytest.mark.parametrize(
@@ -170,3 +177,28 @@ def test_days_left_is_reported(txs: dict[str, Any]) -> None:
         FakeBank(list(txs.values()), valid_until=NOW + timedelta(days=12, hours=5)), repo, sessions
     )
     assert result.days_left == 12
+
+
+def test_account_key_resolved_once_and_stored(txs: dict[str, Any]) -> None:
+    repo, sessions = InMemoryExpenseRepository(), InMemorySessionStore()
+    bank = FakeBank(list(txs.values()))
+    run(bank, repo, sessions)
+    run(bank, repo, sessions)
+    assert bank.key_calls == 1
+    saved = sessions.get(SID)
+    assert saved is not None and saved.account_keys == (KEY,)
+
+
+def test_reconnect_with_new_uid_does_not_duplicate(txs: dict[str, Any]) -> None:
+    repo, sessions = InMemoryExpenseRepository(), InMemorySessionStore()
+    run(FakeBank(list(txs.values())), repo, sessions)
+    # A new consent: same bank account, new uid, so the stable key must match the old one.
+    bank2 = FakeBank(list(txs.values()))
+    new_uid = "11111111-1111-1111-1111-111111111111"
+    bank2.keys = {new_uid: KEY}
+    sessions.save(
+        ConsentSession("session-0002", "enablebanking", (new_uid,), NOW, NOW + timedelta(days=90))
+    )
+    result = run(bank2, repo, sessions)
+    assert (result.inserted, result.skipped) == (0, 6)
+    assert len(repo.list()) == 6

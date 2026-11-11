@@ -25,3 +25,8 @@ Decisions that supplement [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md).
 13. **The pull prefers the newest active session in the table.** The SSM `session` parameter is now only a bootstrap for the first session. Sessions carry `gsi1pk = SESSIONS#<provider>` so lookups are a query, not a scan.
 14. **Expiry reminders come from the pull.** After a successful run it logs `consent_expiring` (14 days or fewer left) and `consent_expiring_soon` (3 days or fewer); one-day-period alarms email once per threshold. Expired or revoked consent still raises the existing `consent_invalid` alarm.
 15. **Consent runs in its own Lambda and role.** It reads only the app id and key (not the session parameter) and writes only consent state and sessions.
+
+## Account identity
+
+16. **Accounts are keyed on a stable hash, not the bank's account uid.** Enable Banking issues new account uids with every consent session, so keying on the uid duplicated every transaction after the first reconnect (found on the first real reconnect, 2026-11-11). The key is `sha256(identification_hash)[:32]` from `GET /accounts/{uid}/details`, which was verified to be identical across two sessions. It is resolved once per session and stored on the session (`account_keys`). The bank's own hash is hashed again so it never appears in a partition key or a log. `scripts/migrate_account_ids.py` moved the existing rows; a previous session's uid can no longer be resolved by the bank, so the script takes the hash from the local spike file as a fallback.
+

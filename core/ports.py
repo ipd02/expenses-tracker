@@ -84,6 +84,10 @@ class BankClient(Protocol):
 
     def get_balances(self, account_uid: str) -> Sequence[Mapping[str, Any]]: ...
 
+    def get_account_key(self, account_uid: str) -> str:
+        """Opaque key for the account that stays the same across consent sessions."""
+        ...
+
 
 class ConsentClient(Protocol):
     """Starts and completes a bank consent. Raises BankError subclasses."""
