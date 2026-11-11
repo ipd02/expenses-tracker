@@ -8,7 +8,7 @@ tick is the retry.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from enum import StrEnum
 
@@ -36,8 +36,19 @@ class PullResult:
     days_left: int | None = None  # whole days until the consent expires (OK runs only)
 
 
-def account_id_for(provider: str, account_uid: str) -> str:
-    return f"{provider}:{account_uid}:"
+def account_id_for(provider: str, account_key: str) -> str:
+    return f"{provider}:{account_key}:"
+
+
+def _account_keys(
+    session: ConsentSession, bank: BankClient, sessions: SessionStore
+) -> tuple[str, ...]:
+    """Stable keys for the session's accounts; resolved once, then kept on the session."""
+    if len(session.account_keys) == len(session.account_ids):
+        return session.account_keys
+    keys = tuple(bank.get_account_key(uid) for uid in session.account_ids)
+    sessions.save(replace(session, account_keys=keys))
+    return keys
 
 
 def _resolve_session(
@@ -93,14 +104,15 @@ def pull(
                 sessions.mark_expired(session.session_id)
             return PullResult(PullStatus.CONSENT_INVALID)
 
-        for uid in session.account_ids:
+        keys = _account_keys(session, bank, sessions)
+        for uid, key in zip(session.account_ids, keys, strict=True):
             booked = []
             total = 0
             for tx in bank.iter_transactions(uid, date_from):
                 total += 1
                 if tx.get("status") == BOOKED:
                     booked.append(tx)
-            result = ingest(booked, account_id_for(provider, uid), repo)
+            result = ingest(booked, account_id_for(provider, key), repo)
             inserted += result.inserted
             skipped += result.skipped + (total - len(booked))
             accounts += 1

@@ -118,6 +118,9 @@ class ConsentSession:
     created_at: datetime
     expires_at: datetime
     status: SessionStatus = SessionStatus.ACTIVE
+    # Stable per-account keys, parallel to account_ids. The bank issues new account uids with
+    # every session, so storage is keyed on these instead. Empty until first resolved.
+    account_keys: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.created_at.tzinfo is None or self.expires_at.tzinfo is None:

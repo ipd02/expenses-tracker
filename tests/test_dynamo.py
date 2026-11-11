@@ -157,3 +157,14 @@ def test_sessions_are_listed_through_the_index_not_a_scan(table: Any) -> None:
     assert store.get("old") is not None
     assert [s.session_id for s in store.list("enablebanking")] == ["s1"]
     assert {s.session_id for s in store.list()} == {"s1", "old"}
+
+
+def test_session_account_keys_round_trip_and_default(table: Any) -> None:
+    from dataclasses import replace
+
+    store = DynamoSessionStore(table)
+    store.save(make_session("s1"))
+    assert store.get("s1") == make_session("s1")  # legacy items have no keys
+    keyed = replace(make_session("s1"), account_keys=("k1", "k2"))
+    store.save(keyed)
+    assert store.get("s1") == keyed

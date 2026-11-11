@@ -30,6 +30,9 @@ class Bank:
     def iter_transactions(self, account_uid: str, date_from: Any) -> Any:
         yield from self.txs
 
+    def get_account_key(self, account_uid: str) -> str:
+        return "k" * 32
+
 
 def deps(bank: Bank) -> Deps:
     return Deps(bank, InMemoryExpenseRepository(), InMemorySessionStore(), Secrets(), "/p")  # type: ignore[arg-type]
