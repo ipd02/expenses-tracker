@@ -30,3 +30,12 @@ Decisions that supplement [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md).
 
 16. **Accounts are keyed on a stable hash, not the bank's account uid.** Enable Banking issues new account uids with every consent session, so keying on the uid duplicated every transaction after the first reconnect (found on the first real reconnect, 2026-11-11). The key is `sha256(identification_hash)[:32]` from `GET /accounts/{uid}/details`, which was verified to be identical across two sessions. It is resolved once per session and stored on the session (`account_keys`). The bank's own hash is hashed again so it never appears in a partition key or a log. `scripts/migrate_account_ids.py` moved the existing rows; a previous session's uid can no longer be resolved by the bank, so the script takes the hash from the local spike file as a fallback.
 
+## Phase 5
+
+17. **The passkey is the second factor, on the Cognito Essentials plan.** Checked 2026-11-18: passkeys need Essentials or Plus, Essentials includes 10,000 monthly active users free (no expiry), so one user costs nothing. Fallback would have been TOTP on the Lite plan. A passkey is bound to a domain, so it is registered once the web domain exists (phase 6).
+18. **The read API has its own Lambda and role, with no SSM access.** Starting a consent and pulling are invokes of the consent and pull functions, so the bank key stays in the roles that already own it. A compromised API function cannot read the key.
+19. **Deny by default inside the handler as well as at the gateway.** Besides the JWT authorizer, the handler requires `token_use=access` and a `sub` equal to the configured owner; anything else is 401 or 403 before any route logic runs. Unknown query parameters are a 400, and errors carry a code only, never detail.
+20. **Expense ids are opaque** (base64url of the source key). Responses omit the raw bank payload and the account identifier. Amounts are decimal strings.
+21. **Manual refresh is limited to one per 15 minutes**, enforced by a conditional write in DynamoDB (not in memory, because Lambda instances are many), to stay under the bank's unattended allowance.
+22. **Filtering and aggregation live in `core/query.py`**, used by both the in-memory and DynamoDB repositories, with tests asserting identical results. DynamoDB narrows reads by account (sort-key range) or by month (gsi1) and falls back to a filtered scan only when a query has no date bounds.
+

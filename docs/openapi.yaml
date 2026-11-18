@@ -1,0 +1,170 @@
+openapi: 3.0.3
+info:
+  title: Expenses tracker API
+  version: 0.1.0
+  description: |
+    Read and categorise the owner's expenses. Every route requires a Cognito access token
+    (HTTP API JWT authorizer) whose `sub` is the single configured owner; anything else is
+    401 (no or invalid token) or 403 (valid token, wrong identity).
+    Amounts are decimal strings, never numbers. Errors are `{"error": "<code>"}` with no detail.
+servers:
+  - url: https://api.example.invalid # replaced by the real API URL from Terraform outputs
+security:
+  - cognito: []
+paths:
+  /expenses:
+    get:
+      operationId: listExpenses
+      summary: List expenses, newest first
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+        - {name: category, in: query, schema: {type: string, maxLength: 64}}
+        - {name: uncategorized, in: query, schema: {type: boolean}}
+        - {name: direction, in: query, schema: {type: string, enum: [debit, credit]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        "200":
+          description: A page of expenses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/Expense"}}
+                  total: {type: integer, description: Matches before limit and offset}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /expenses/{id}/category:
+    put:
+      operationId: setCategory
+      summary: Set or clear the category of one expense
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9_-]{1,512}$"}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category]
+              additionalProperties: false
+              properties:
+                category: {type: string, nullable: true, minLength: 1, maxLength: 64}
+      responses:
+        "200":
+          description: The updated expense
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Expense"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No such expense}
+  /summary/monthly:
+    get:
+      operationId: monthlySummary
+      summary: Totals by month, category, direction and currency
+      parameters:
+        - {name: year, in: query, schema: {type: integer, minimum: 2000, maximum: 2100}}
+      responses:
+        "200":
+          description: Aggregates, ordered by month
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/MonthlyAggregate"}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /connection:
+    get:
+      operationId: connectionStatus
+      summary: State of the bank consent
+      responses:
+        "200":
+          description: Consent state
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Connection"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      operationId: startConnection
+      summary: Start a bank connection or reconnection
+      description: Returns the bank approval URL (valid 15 minutes). The bank redirects to the public callback.
+      responses:
+        "200":
+          description: Where to send the user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string, format: uri}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "502": {description: The bank could not start a consent}
+  /refresh:
+    post:
+      operationId: refresh
+      summary: Ask for an immediate bank pull
+      description: At most one accepted request per 15 minutes; the bank allows about four unattended calls a day.
+      responses:
+        "202": {description: Pull started}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429":
+          description: Asked too recently
+          headers:
+            Retry-After: {schema: {type: integer}}
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    BadRequest: {description: Invalid input}
+    Unauthorized: {description: Missing or invalid token}
+    Forbidden: {description: Valid token, not the owner}
+  schemas:
+    Expense:
+      type: object
+      required: [id, booking_date, amount, currency, direction, counterparty, payment_type, description, category, source]
+      properties:
+        id: {type: string, description: Opaque identifier, use it as-is in paths}
+        booking_date: {type: string, format: date}
+        amount: {type: string, pattern: '^[0-9]+(\.[0-9]+)?$', description: Always positive; see direction}
+        currency: {type: string}
+        direction: {type: string, enum: [debit, credit]}
+        counterparty: {type: string, description: Free text from the bank; render as text only}
+        payment_type: {type: string}
+        description: {type: string, description: Free text from the bank; render as text only}
+        category: {type: string, nullable: true}
+        source: {type: string, enum: [enablebanking, receipt]}
+    MonthlyAggregate:
+      type: object
+      required: [month, category, direction, currency, total, count]
+      properties:
+        month: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$'}
+        category: {type: string, nullable: true}
+        direction: {type: string, enum: [debit, credit]}
+        currency: {type: string}
+        total: {type: string}
+        count: {type: integer}
+    Connection:
+      type: object
+      required: [status, days_left, expires_at, expiring_soon]
+      properties:
+        status: {type: string, enum: [active, expired, revoked, none]}
+        expires_at: {type: string, format: date-time, nullable: true}
+        days_left: {type: integer, nullable: true}
+        expiring_soon: {type: boolean, description: 14 days or fewer left, or no active consent}

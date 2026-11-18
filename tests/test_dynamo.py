@@ -168,3 +168,72 @@ def test_session_account_keys_round_trip_and_default(table: Any) -> None:
     keyed = replace(make_session("s1"), account_keys=("k1", "k2"))
     store.save(keyed)
     assert store.get("s1") == keyed
+
+
+def _both(table: Any, txs: dict[str, Any], account_id: str) -> tuple[Any, Any]:
+    from core.ingest import ingest
+    from core.memory import InMemoryExpenseRepository
+
+    dyn, mem = DynamoExpenseRepository(table), InMemoryExpenseRepository()
+    for repo in (dyn, mem):
+        ingest(txs.values(), account_id, repo)
+        ingest([txs["card_payment"]], "enablebanking:other:", repo)  # second account
+        repo.set_category(account_id + "REF-0001", "Fuel")
+    return dyn, mem
+
+
+def test_list_matches_the_in_memory_repository(
+    table: Any, txs: dict[str, Any], account_id: str
+) -> None:
+    from datetime import date
+
+    from core.models import Direction
+
+    dyn, mem = _both(table, txs, account_id)
+    cases: list[dict[str, Any]] = [
+        {},
+        {"account_id": account_id},
+        {"date_from": date(2025, 3, 1), "date_to": date(2025, 3, 31)},
+        {"date_from": date(2025, 3, 6), "date_to": date(2025, 4, 1)},  # spans two months
+        {"date_from": date(2025, 3, 7)},  # unbounded above: scan path
+        {"date_to": date(2025, 3, 6)},
+        {"account_id": account_id, "date_from": date(2025, 3, 6), "date_to": date(2025, 3, 6)},
+        {"category": "Fuel"},
+        {"uncategorized": True},
+        {"direction": Direction.CREDIT},
+    ]
+    for kwargs in cases:
+        assert dyn.list(**kwargs) == mem.list(**kwargs), kwargs
+    assert len(dyn.list()) == 7
+
+
+def test_aggregates_match_the_in_memory_repository(
+    table: Any, txs: dict[str, Any], account_id: str
+) -> None:
+    dyn, mem = _both(table, txs, account_id)
+    for kwargs in ({}, {"year": 2025}, {"year": 2024}, {"account_id": account_id}):
+        assert dyn.monthly_aggregates(**kwargs) == mem.monthly_aggregates(**kwargs), kwargs
+
+
+def test_set_category_updates_only_the_category(
+    table: Any, txs: dict[str, Any], account_id: str
+) -> None:
+    from core.errors import ValidationError
+
+    repo = DynamoExpenseRepository(table)
+    repo.put_if_absent(normalize_transaction(txs["card_payment"], account_id))
+    key = account_id + "REF-0001"
+    before = repo.get(key)
+    assert before is not None
+    after = repo.set_category(key, "  Fuel ")
+    assert after.category == "Fuel" and repo.get(key) == after
+    assert dict(repo.get(key).raw) == dict(before.raw)  # type: ignore[union-attr]
+    assert repo.set_category(key, None).category is None
+    assert repo.get(key).category is None  # type: ignore[union-attr]
+    with pytest.raises(NotFoundError):
+        repo.set_category(account_id + "missing", "Fuel")
+    with pytest.raises(NotFoundError):
+        repo.set_category("malformed", "Fuel")
+    with pytest.raises(ValidationError):
+        repo.set_category(key, "a\nb")
+    assert len(repo.list()) == 1  # no stray items created by the conditional update
