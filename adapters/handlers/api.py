@@ -13,8 +13,9 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from adapters.dynamo import DynamoExpenseRepository, DynamoRefreshLimiter, DynamoSessionStore
@@ -28,6 +29,7 @@ MAX_LIMIT = 500
 DEFAULT_LIMIT = 100
 MAX_BODY = 1024
 EXPIRING_DAYS = 14
+DEFAULT_RANGE_DAYS = 365  # the API never does an unbounded table scan
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,512}")
 _CATEGORY_PATH = re.compile(r"/expenses/([^/]+)/category")
 _HEADERS = {
@@ -45,6 +47,7 @@ class Deps:
     invoker: Any
     owner_sub: str
     provider: str = wiring.PROVIDER
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
 
 
 def _default_deps() -> Deps:
@@ -110,7 +113,7 @@ def _authorize(event: dict[str, Any], d: Deps) -> dict[str, Any] | None:
         return _error(401, "unauthorized")
     if claims.get("token_use") != "access":
         return _error(401, "unauthorized")
-    if claims["sub"] != d.owner_sub:
+    if not d.owner_sub or claims["sub"] != d.owner_sub:  # an unset owner matches nobody
         log("api_denied", logging.WARNING, reason="not_owner")
         return _error(403, "forbidden")
     return None
@@ -143,11 +146,16 @@ def _params(event: dict[str, Any], allowed: set[str]) -> dict[str, str]:
     return dict(params)
 
 
-def _list(event: dict[str, Any], d: Deps) -> dict[str, Any]:
+def _list(event: dict[str, Any], d: Deps, now: datetime) -> dict[str, Any]:
     p = _params(event, {"from", "to", "category", "uncategorized", "direction", "limit", "offset"})
     date_from = _date(p["from"]) if "from" in p else None
     date_to = _date(p["to"]) if "to" in p else None
     if date_from and date_to and date_from > date_to:
+        raise ValidationError("from after to")
+    today = now.date()
+    date_to = date_to or today + timedelta(days=1)
+    date_from = date_from or date_to - timedelta(days=DEFAULT_RANGE_DAYS)
+    if date_from > date_to:
         raise ValidationError("from after to")
     category = validate_category(p["category"]) if "category" in p else None
     if p.get("uncategorized", "false") not in ("true", "false"):
@@ -188,9 +196,9 @@ def _set_category(event: dict[str, Any], raw_id: str, d: Deps) -> dict[str, Any]
     return _resp(200, _expense_json(d.repo.set_category(source_key, category)))
 
 
-def _monthly(event: dict[str, Any], d: Deps) -> dict[str, Any]:
+def _monthly(event: dict[str, Any], d: Deps, now: datetime) -> dict[str, Any]:
     p = _params(event, {"year"})
-    year = _int(p["year"], 2000, 2100) if "year" in p else None
+    year = _int(p["year"], 2000, 2100) if "year" in p else now.year
     rows = d.repo.monthly_aggregates(year=year)
     items = [
         {
@@ -243,9 +251,9 @@ def _route(event: dict[str, Any], d: Deps, now: datetime) -> dict[str, Any]:
     if not isinstance(path, str):
         return _error(404, "not_found")
     if method == "GET" and path == "/expenses":
-        return _list(event, d)
+        return _list(event, d, now)
     if method == "GET" and path == "/summary/monthly":
-        return _monthly(event, d)
+        return _monthly(event, d, now)
     if method == "GET" and path == "/connection":
         return _connection(d, now)
     if method == "POST" and path == "/connection":
@@ -264,7 +272,7 @@ def handler(event: dict[str, Any], context: object, *, deps: Deps | None = None)
     if denied is not None:
         return denied
     try:
-        out = _route(event, d, datetime.now(UTC))
+        out = _route(event, d, d.clock())
     except ValidationError:
         out = _error(400, "invalid_request")
     except NotFoundError:

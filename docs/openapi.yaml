@@ -16,6 +16,7 @@ paths:
     get:
       operationId: listExpenses
       summary: List expenses, newest first
+      description: Without `from` and `to`, covers the last 12 months (the API never scans the whole table).
       parameters:
         - {name: from, in: query, schema: {type: string, format: date}}
         - {name: to, in: query, schema: {type: string, format: date}}
@@ -68,6 +69,7 @@ paths:
     get:
       operationId: monthlySummary
       summary: Totals by month, category, direction and currency
+      description: Defaults to the current year.
       parameters:
         - {name: year, in: query, schema: {type: integer, minimum: 2000, maximum: 2100}}
       responses:

@@ -29,3 +29,14 @@ variable "pull_lookback_days" {
   type    = number
   default = 14
 }
+
+variable "owner_email" {
+  type        = string
+  description = "Email of the single Cognito user (receives the invitation with a temporary password)"
+}
+
+variable "cors_origins" {
+  type        = list(string)
+  default     = ["http://localhost:5173"]
+  description = "Browser origins allowed to call the API; phase 6 adds the CloudFront URL"
+}
