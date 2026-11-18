@@ -8,13 +8,22 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Sequence
-from datetime import datetime
+from dataclasses import replace
+from datetime import date, datetime
 from typing import Any
 
 from botocore.exceptions import ClientError
 
 from core.errors import NotFoundError
-from core.models import ConsentSession, Expense, SessionStatus
+from core.models import (
+    ConsentSession,
+    Direction,
+    Expense,
+    MonthlyAggregate,
+    SessionStatus,
+    validate_category,
+)
+from core.query import aggregate_monthly, filter_expenses
 
 EXPENSE_PK = "ACCOUNT#"
 SESSION_PK = "SESSION#"
@@ -91,6 +100,127 @@ class DynamoExpenseRepository:
             if "LastEvaluatedKey" not in resp:
                 return None
             kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+    def _query_all(self, **kwargs: Any) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        while True:
+            resp = self._table.query(**kwargs)
+            items.extend(resp["Items"])
+            if "LastEvaluatedKey" not in resp:
+                return items
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+    def _candidates(
+        self, account_id: str | None, date_from: date | None, date_to: date | None
+    ) -> list[Expense]:
+        """Narrow the read as far as the key schema allows; callers still filter exactly."""
+        lo = date_from.isoformat() if date_from else None
+        hi = date_to.isoformat() if date_to else None
+        if account_id is not None:
+            items = self._query_all(
+                KeyConditionExpression="pk = :pk AND sk BETWEEN :lo AND :hi",
+                ExpressionAttributeValues={
+                    ":pk": f"{EXPENSE_PK}{account_id}",
+                    ":lo": f"TXN#{lo or ''}",
+                    ":hi": f"TXN#{hi or '9999-99-99'}~",  # '~' sorts after any reference
+                },
+            )
+        elif date_from is not None and date_to is not None:
+            items = []
+            for month in _months(date_from, date_to):
+                items += self._query_all(
+                    IndexName="gsi1",
+                    KeyConditionExpression="gsi1pk = :m AND gsi1sk BETWEEN :lo AND :hi",
+                    ExpressionAttributeValues={
+                        ":m": f"MONTH#{month}",
+                        ":lo": lo,
+                        ":hi": f"{hi}~",
+                    },
+                )
+        else:  # unbounded: a filtered scan is acceptable at personal-finance volumes
+            items = []
+            kwargs: dict[str, Any] = {
+                "FilterExpression": "begins_with(pk, :p) AND begins_with(sk, :t)",
+                "ExpressionAttributeValues": {":p": EXPENSE_PK, ":t": "TXN#"},
+            }
+            while True:
+                resp = self._table.scan(**kwargs)
+                items.extend(resp["Items"])
+                if "LastEvaluatedKey" not in resp:
+                    break
+                kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        return [_expense_from_item(i) for i in items]
+
+    def list(
+        self,
+        *,
+        account_id: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        category: str | None = None,
+        uncategorized: bool = False,
+        direction: Direction | None = None,
+    ) -> Sequence[Expense]:
+        return filter_expenses(
+            self._candidates(account_id, date_from, date_to),
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            category=category,
+            uncategorized=uncategorized,
+            direction=direction,
+        )
+
+    def set_category(self, source_key: str, category: str | None) -> Expense:
+        cleaned = validate_category(category)
+        current = self.get(source_key)
+        if current is None:
+            raise NotFoundError("expense not found")
+        ref = source_key[len(current.account_id) :]
+        key = {
+            "pk": f"{EXPENSE_PK}{current.account_id}",
+            "sk": f"TXN#{current.booking_date.isoformat()}#{ref}",
+        }
+        names = {"#c": "category"}
+        try:
+            if cleaned is None:
+                self._table.update_item(
+                    Key=key,
+                    UpdateExpression="REMOVE #c",
+                    ConditionExpression="attribute_exists(pk)",
+                    ExpressionAttributeNames=names,
+                )
+            else:
+                self._table.update_item(
+                    Key=key,
+                    UpdateExpression="SET #c = :v",
+                    ConditionExpression="attribute_exists(pk)",
+                    ExpressionAttributeNames=names,
+                    ExpressionAttributeValues={":v": cleaned},
+                )
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                raise NotFoundError("expense not found") from exc
+            raise
+        return replace(current, category=cleaned)
+
+    def monthly_aggregates(
+        self, *, year: int | None = None, account_id: str | None = None
+    ) -> Sequence[MonthlyAggregate]:
+        lo = date(year, 1, 1) if year else None
+        hi = date(year, 12, 31) if year else None
+        return aggregate_monthly(
+            self._candidates(account_id, lo, hi), year=year, account_id=account_id
+        )
+
+
+def _months(start: date, end: date) -> list[str]:
+    out: list[str] = []
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
 
 
 def _session_item(session: ConsentSession) -> dict[str, Any]:
@@ -213,3 +343,32 @@ class DynamoConsentAttemptStore:
                 return False
             raise
         return now < datetime.fromisoformat(resp["Attributes"]["expires_at"])
+
+
+class DynamoRefreshLimiter:
+    """At most one manual refresh per interval, enforced with a conditional write."""
+
+    def __init__(self, table: Any, interval_seconds: int = 900) -> None:
+        self._table = table
+        self._interval = interval_seconds
+        self._key = {"pk": "RATE#refresh", "sk": "META"}
+
+    def try_acquire(self, now: datetime) -> int | None:
+        """None if granted, else the seconds to wait."""
+        epoch = int(now.timestamp())
+        try:
+            self._table.put_item(
+                Item={
+                    **self._key,
+                    "next_allowed": epoch + self._interval,
+                    "ttl": epoch + self._interval + 3600,
+                },
+                ConditionExpression="attribute_not_exists(pk) OR next_allowed <= :now",
+                ExpressionAttributeValues={":now": epoch},
+            )
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            item = self._table.get_item(Key=self._key).get("Item") or {}
+            return max(1, int(item.get("next_allowed", epoch + self._interval)) - epoch)
+        return None

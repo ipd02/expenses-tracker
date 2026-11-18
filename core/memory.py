@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from datetime import date, datetime
-from decimal import Decimal
 
 from core.errors import NotFoundError
 from core.models import (
@@ -17,6 +15,7 @@ from core.models import (
     SessionStatus,
     validate_category,
 )
+from core.query import aggregate_monthly, filter_expenses
 
 
 class InMemoryExpenseRepository:
@@ -45,19 +44,15 @@ class InMemoryExpenseRepository:
         uncategorized: bool = False,
         direction: Direction | None = None,
     ) -> Sequence[Expense]:
-        out = [
-            e
-            for e in self._items.values()
-            if (account_id is None or e.account_id == account_id)
-            and (date_from is None or e.booking_date >= date_from)
-            and (date_to is None or e.booking_date <= date_to)
-            and (category is None or e.category == category)
-            and (not uncategorized or e.category is None)
-            and (direction is None or e.direction is direction)
-        ]
-        out.sort(key=lambda e: e.source_key)
-        out.sort(key=lambda e: e.booking_date, reverse=True)
-        return out
+        return filter_expenses(
+            self._items.values(),
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            category=category,
+            uncategorized=uncategorized,
+            direction=direction,
+        )
 
     def set_category(self, source_key: str, category: str | None) -> Expense:
         current = self._items.get(source_key)
@@ -70,22 +65,7 @@ class InMemoryExpenseRepository:
     def monthly_aggregates(
         self, *, year: int | None = None, account_id: str | None = None
     ) -> Sequence[MonthlyAggregate]:
-        totals: dict[tuple[str, str | None, Direction, str], Decimal] = defaultdict(Decimal)
-        counts: dict[tuple[str, str | None, Direction, str], int] = defaultdict(int)
-        for e in self._items.values():
-            if year is not None and e.booking_date.year != year:
-                continue
-            if account_id is not None and e.account_id != account_id:
-                continue
-            key = (e.month, e.category, e.direction, e.currency)
-            totals[key] += e.amount
-            counts[key] += 1
-        rows = [
-            MonthlyAggregate(m, c, d, cur, total, counts[(m, c, d, cur)])
-            for (m, c, d, cur), total in totals.items()
-        ]
-        rows.sort(key=lambda r: (r.month, r.category or "", r.direction.value, r.currency))
-        return rows
+        return aggregate_monthly(self._items.values(), year=year, account_id=account_id)
 
 
 class InMemorySessionStore:

@@ -29,6 +29,10 @@ Consent Lambda, `GET /callback` API and expiry alarms are live; DECISIONS 10 to 
 The first reconnect exposed duplicate rows (the bank issues new account uids per session). Fixed by keying on a stable account key (DECISIONS 16) and migrating the 12 existing rows to 9 (3 duplicates dropped).
 Fix deployed and verified on 2026-11-18: a live pull resolved the stable key, inserted 0 and skipped the stored rows, with one partition of 9 rows. The pull schedule is enabled again. Optional: test an expiry reminder by lowering the thresholds temporarily.
 
+## Phase 5a: read API code (written, not applied)
+Branch `feat/phase-5a-read-api`. OpenAPI contract in `docs/openapi.yaml`; DynamoDB list, category update and monthly aggregates; API handler with owner check, validation and refresh limit; DECISIONS 17 to 22. 246 tests pass.
+Phase 5b (next): Cognito user pool (Essentials, passkey), HTTP API with JWT authorizer, API Lambda and role, throttling, alarms, and a live test with a real token. Owner steps: create the Cognito user and register the passkey.
+
 ## Notes
 - Ingest raises on non-BOOK transactions; the pull filters them out first (done in phase 3).
 - `adapters/lambda/` became `adapters/handlers/` (`lambda` is a Python keyword and cannot be imported normally).
