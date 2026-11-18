@@ -32,9 +32,10 @@ Fix deployed and verified on 2026-11-18: a live pull resolved the stable key, in
 ## Phase 5a: read API code (merged, PR #11)
 OpenAPI contract, DynamoDB queries, API handler (DECISIONS 17 to 22).
 
-## Phase 5b: infrastructure (written, not applied)
-Branch `feat/phase-5b-infra`. Cognito user pool (Essentials, passkey + password with TOTP, one Terraform-created user), managed login on a prefix domain, HTTP API with JWT authorizer and per-route throttling, API Lambda and role (DECISIONS 23 to 25), alarms for API errors and non-owner requests. Plan: 24 to add, 2 to change (new code zip for pull and consent), 0 to destroy.
-Owner steps after the apply: open the invitation email, set a password and a TOTP app, register the passkey on the sign-in page, then run the live token test.
+## Phase 5b: infrastructure (applied 2026-11-18)
+Cognito pool (Essentials, passkey + password with TOTP, MFA on), managed login on the prefix domain, HTTP API with JWT authorizer and per-route throttling, API Lambda and role, alarms (DECISIONS 23 to 26). Smoke test: no token, garbage token and unauthenticated POST all give 401; unknown path 404.
+The first apply needed a staged bootstrap and one CLI call (notes in `infra/cognito.tf`).
+Owner steps: open the invitation email, set a password, set up a TOTP app, register a passkey on the sign-in page. Then the live token test: `scripts/get_token.py` and the route checks.
 
 ## Notes
 - Ingest raises on non-BOOK transactions; the pull filters them out first (done in phase 3).

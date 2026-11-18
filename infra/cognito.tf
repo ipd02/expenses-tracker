@@ -9,11 +9,21 @@ locals {
   cognito_domain        = "${local.cognito_domain_prefix}.auth.${var.region}.amazoncognito.com"
 }
 
+# Bootstrap notes (learned on the first apply, 2026-11-18), only needed to recreate the pool:
+#   1. apply with -var passkey_enabled=false -var mfa_required=false (domain must exist first);
+#   2. apply with -var mfa_required=false to configure the passkey;
+#   3. the provider cannot set the passkey FactorConfiguration, and Cognito refuses required MFA
+#      while it is SINGLE_FACTOR, so run once:
+#        aws cognito-idp set-user-pool-mfa-config --user-pool-id <id> --mfa-configuration ON \
+#          --software-token-mfa-configuration Enabled=true \
+#          --web-authn-configuration RelyingPartyId=<domain>,UserVerification=required,FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION
+#   4. apply with the defaults. A later change to the MFA or passkey settings in Terraform would
+#      reset FactorConfiguration; repeat step 3 if that happens.
 resource "aws_cognito_user_pool" "main" {
   name                = "expenses-tracker"
   deletion_protection = "ACTIVE"
   user_pool_tier      = "ESSENTIALS"
-  mfa_configuration   = "ON"
+  mfa_configuration   = var.mfa_required ? "ON" : "OPTIONAL" # ON must be applied after the passkey configuration exists
 
   username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
@@ -36,12 +46,18 @@ resource "aws_cognito_user_pool" "main" {
   }
 
   sign_in_policy {
-    allowed_first_auth_factors = ["PASSWORD", "WEB_AUTHN"]
+    allowed_first_auth_factors = var.passkey_enabled ? ["PASSWORD", "WEB_AUTHN"] : ["PASSWORD"]
   }
 
-  web_authn_configuration {
-    relying_party_id  = local.cognito_domain
-    user_verification = "required"
+  # Cognito only accepts the prefix domain as relying party ID once the domain exists, and the
+  # domain needs the pool: create everything with passkey_enabled = false, then apply with true.
+  dynamic "web_authn_configuration" {
+    for_each = var.passkey_enabled ? [1] : []
+
+    content {
+      relying_party_id  = local.cognito_domain
+      user_verification = "required"
+    }
   }
 
   account_recovery_setting {
