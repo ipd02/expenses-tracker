@@ -84,7 +84,10 @@ module "api" {
         {
           test     = "ForAllValues:StringEquals"
           variable = "dynamodb:Attributes"
-          values   = ["category"]
+          # DynamoDB requires the table's and the index's key attributes in this list for writes.
+          # Primary keys cannot be modified; the index keys can, so the worst case is moving a
+          # row between months in gsi1. Amounts, counterparties and descriptions stay unwritable.
+          values = ["category", "pk", "sk", "gsi1pk", "gsi1sk"]
         },
       ]
     },
