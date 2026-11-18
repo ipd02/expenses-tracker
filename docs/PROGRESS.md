@@ -32,10 +32,11 @@ Fix deployed and verified on 2026-11-18: a live pull resolved the stable key, in
 ## Phase 5a: read API code (merged, PR #11)
 OpenAPI contract, DynamoDB queries, API handler (DECISIONS 17 to 22).
 
-## Phase 5b: infrastructure (applied 2026-11-18)
-Cognito pool (Essentials, passkey + password with TOTP, MFA on), managed login on the prefix domain, HTTP API with JWT authorizer and per-route throttling, API Lambda and role, alarms (DECISIONS 23 to 26). Smoke test: no token, garbage token and unauthenticated POST all give 401; unknown path 404.
-The first apply needed a staged bootstrap and one CLI call (notes in `infra/cognito.tf`).
-Owner steps: open the invitation email, set a password, set up a TOTP app, register a passkey on the sign-in page. Then the live token test: `scripts/get_token.py` and the route checks.
+## Phase 5: done (applied 2026-11-18)
+Cognito (Essentials, passkey + password with TOTP, MFA on), managed login, HTTP API with JWT authorizer and per-route throttling, API Lambda and role, alarms. DECISIONS 17 to 27. Owner signed in with `scripts/get_token.py`.
+Live test with the real token: list (9 rows, safe fields only), monthly summary, connection status (active, 82 days), category set/filter/clear/restore, start-connection (https bank URL), refresh (202 then 429 with Retry-After, pull finished ok), validation 400/404, and 401 for no token, garbage token, tampered signature, tampered payload and `alg: none`.
+Not live-tested: 403 for a valid token of another user (covered by handler tests; no second user exists) and an expired token (30-minute lifetime; gateway behaviour). The first apply needed a staged bootstrap and one CLI call (notes in `infra/cognito.tf`).
+Passkey: the owner still has to register one on the sign-in page if not done during the first sign-in.
 
 ## Notes
 - Ingest raises on non-BOOK transactions; the pull filters them out first (done in phase 3).
