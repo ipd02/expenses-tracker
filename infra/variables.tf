@@ -29,3 +29,26 @@ variable "pull_lookback_days" {
   type    = number
   default = 14
 }
+
+variable "owner_email" {
+  type        = string
+  description = "Email of the single Cognito user (receives the invitation with a temporary password)"
+}
+
+variable "cors_origins" {
+  type        = list(string)
+  default     = ["http://localhost:5173"]
+  description = "Browser origins allowed to call the API; phase 6 adds the CloudFront URL"
+}
+
+variable "passkey_enabled" {
+  type        = bool
+  default     = true
+  description = "Passkey sign-in. On a brand-new pool it can only be enabled after the Cognito domain exists (see cognito.tf)"
+}
+
+variable "mfa_required" {
+  type        = bool
+  default     = true
+  description = "Require MFA. On a brand-new pool see the bootstrap notes in cognito.tf"
+}

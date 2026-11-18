@@ -13,6 +13,11 @@ variable "policy_statements" {
     sid       = string
     actions   = list(string)
     resources = list(string)
+    conditions = optional(list(object({
+      test     = string
+      variable = string
+      values   = list(string)
+    })), [])
   }))
   description = "Extra least-privilege statements; logging to the function's own log group is added automatically"
 }

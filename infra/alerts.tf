@@ -123,3 +123,46 @@ resource "aws_cloudwatch_metric_alarm" "consent_errors" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = [aws_sns_topic.alerts.arn]
 }
+
+# API: an unexpected error in the function, and any request from a valid token that is not the owner.
+resource "aws_cloudwatch_metric_alarm" "api_errors" {
+  alarm_name          = "expenses-tracker-api-errors"
+  alarm_description   = "The API Lambda raised an unexpected error"
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  dimensions          = { FunctionName = aws_lambda_function.api.function_name }
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+}
+
+resource "aws_cloudwatch_log_metric_filter" "api_denied" {
+  name           = "expenses-tracker-api-denied"
+  log_group_name = module.api.log_group_name
+  pattern        = "\"api_denied\""
+
+  metric_transformation {
+    name          = "ApiDenied"
+    namespace     = "ExpensesTracker"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "api_denied" {
+  alarm_name          = "expenses-tracker-api-denied"
+  alarm_description   = "A valid token that is not the owner called the API. Should never happen; investigate."
+  namespace           = "ExpensesTracker"
+  metric_name         = "ApiDenied"
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+}

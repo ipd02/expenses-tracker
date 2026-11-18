@@ -29,9 +29,13 @@ Consent Lambda, `GET /callback` API and expiry alarms are live; DECISIONS 10 to 
 The first reconnect exposed duplicate rows (the bank issues new account uids per session). Fixed by keying on a stable account key (DECISIONS 16) and migrating the 12 existing rows to 9 (3 duplicates dropped).
 Fix deployed and verified on 2026-11-18: a live pull resolved the stable key, inserted 0 and skipped the stored rows, with one partition of 9 rows. The pull schedule is enabled again. Optional: test an expiry reminder by lowering the thresholds temporarily.
 
-## Phase 5a: read API code (written, not applied)
-Branch `feat/phase-5a-read-api`. OpenAPI contract in `docs/openapi.yaml`; DynamoDB list, category update and monthly aggregates; API handler with owner check, validation and refresh limit; DECISIONS 17 to 22. 246 tests pass.
-Phase 5b (next): Cognito user pool (Essentials, passkey), HTTP API with JWT authorizer, API Lambda and role, throttling, alarms, and a live test with a real token. Owner steps: create the Cognito user and register the passkey.
+## Phase 5a: read API code (merged, PR #11)
+OpenAPI contract, DynamoDB queries, API handler (DECISIONS 17 to 22).
+
+## Phase 5b: infrastructure (applied 2026-11-18)
+Cognito pool (Essentials, passkey + password with TOTP, MFA on), managed login on the prefix domain, HTTP API with JWT authorizer and per-route throttling, API Lambda and role, alarms (DECISIONS 23 to 26). Smoke test: no token, garbage token and unauthenticated POST all give 401; unknown path 404.
+The first apply needed a staged bootstrap and one CLI call (notes in `infra/cognito.tf`).
+Owner steps: open the invitation email, set a password, set up a TOTP app, register a passkey on the sign-in page. Then the live token test: `scripts/get_token.py` and the route checks.
 
 ## Notes
 - Ingest raises on non-BOOK transactions; the pull filters them out first (done in phase 3).

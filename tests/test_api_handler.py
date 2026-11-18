@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import boto3
@@ -19,7 +19,7 @@ from core.models import ConsentSession, SessionStatus
 
 OWNER = "owner-sub-1"
 ACCOUNT = "enablebanking:" + "a" * 32 + ":"
-NOW = datetime.now(UTC)
+NOW = datetime(2025, 6, 1, 12, 0, tzinfo=UTC)
 
 
 class FakeInvoker:
@@ -52,7 +52,8 @@ def make_deps(txs: dict[str, Any], **kw: Any) -> Deps:
         sessions=kw.get("sessions", InMemorySessionStore()),
         limiter=kw.get("limiter", FakeLimiter()),
         invoker=kw.get("invoker", FakeInvoker()),
-        owner_sub=OWNER,
+        owner_sub=kw.get("owner", OWNER),
+        clock=lambda: datetime(2025, 6, 1, 12, 0, tzinfo=UTC),
     )
 
 
@@ -380,3 +381,34 @@ def test_responses_are_not_cacheable_and_logs_hold_no_content(
 def _no_aws_creds(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
     yield
+
+
+def test_list_defaults_to_the_last_twelve_months(txs: dict[str, Any]) -> None:
+    d = make_deps(txs)
+    assert call(d, "GET", "/expenses")[1]["total"] == 6
+    d.clock = lambda: datetime(2026, 6, 1, tzinfo=UTC)  # the 2025 rows fall out of the window
+    assert call(d, "GET", "/expenses")[1]["total"] == 0
+    explicit = call(d, "GET", "/expenses", query={"from": "2025-01-01", "to": "2025-12-31"})
+    assert explicit[1]["total"] == 6
+
+
+def test_list_with_only_an_old_to_date_still_has_a_window(txs: dict[str, Any]) -> None:
+    d = make_deps(txs)
+    expected = len(d.repo.list(date_to=date(2025, 3, 6)))
+    assert 0 < expected < 6
+    assert call(d, "GET", "/expenses", query={"to": "2025-03-06"})[1]["total"] == expected
+    # `from` later than the defaulted `to` (today + 1) is rejected, not silently empty
+    assert call(d, "GET", "/expenses", query={"from": "2030-01-01"})[0] == 400
+
+
+def test_monthly_defaults_to_the_current_year(txs: dict[str, Any]) -> None:
+    d = make_deps(txs)
+    assert call(d, "GET", "/summary/monthly")[1]["items"]
+    d.clock = lambda: datetime(2026, 6, 1, tzinfo=UTC)
+    assert call(d, "GET", "/summary/monthly")[1] == {"items": []}
+
+
+def test_unset_owner_matches_nobody(txs: dict[str, Any]) -> None:
+    d = make_deps(txs, owner="")
+    assert call(d, "GET", "/expenses", sub="")[0] == 403
+    assert call(d, "GET", "/expenses")[0] == 403
