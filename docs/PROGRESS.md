@@ -24,10 +24,10 @@ Live checks on 2026-11-05 and 2026-11-09 against the real bank and AWS:
 - Terraform state is local and gitignored: run applies from the main checkout.
 - BBVA consent expires 2027-01-28. Phase 4 adds the reconnect flow and the early reminder.
 
-## Phase 4: applied (2026-11-11)
+## Phase 4: done (applied 2026-11-11)
 Consent Lambda, `GET /callback` API and expiry alarms are live; DECISIONS 10 to 16. The owner registered the redirect URL and reconnected the bank: a new session (expires 2027-02-09) is stored and the pull uses it.
 The first reconnect exposed duplicate rows (the bank issues new account uids per session). Fixed by keying on a stable account key (DECISIONS 16) and migrating the 12 existing rows to 9 (3 duplicates dropped).
-Remaining: deploy the fix, then re-enable the pull schedule (`pull_schedule_enabled`, currently paused with `-var`). To test an expiry reminder, lower the thresholds temporarily.
+Fix deployed and verified on 2026-11-18: a live pull resolved the stable key, inserted 0 and skipped the stored rows, with one partition of 9 rows. The pull schedule is enabled again. Optional: test an expiry reminder by lowering the thresholds temporarily.
 
 ## Notes
 - Ingest raises on non-BOOK transactions; the pull filters them out first (done in phase 3).
